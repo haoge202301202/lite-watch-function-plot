@@ -265,7 +265,7 @@ async function runLogic() {
 
   // ---- 设置项：默认值必须与改版前的外观一致，循环切换要能绕回 ----
   settings.reset();
-  chk('设置项共 7 项（外观 4 + 保留 + 动画级别 + 画面等级）', settings.count() === 7, settings.count());
+  chk('设置项共 6 项（外观 4 + 保留上次函数 + 画面等级）', settings.count() === 6, settings.count());
   chk('默认曲线粗细 3px（与改版前一致）', settings.snapshot().width === 3, settings.snapshot().width);
   chk('默认显示交点', settings.snapshot().showRoots === 1, settings.snapshot().showRoots);
   chk('默认点标记 3px', settings.snapshot().dotSize === 3, settings.snapshot().dotSize);
@@ -289,13 +289,13 @@ async function runLogic() {
   chk('切到接着上次（keepLast=1）', settings.snapshot().keepLast === 1, settings.snapshot().keepLast);
   chk('切到接着上次的显示文本', settings.textOf(4) === '接着上次', settings.textOf(4));
   settings.reset();
-  chk('默认动画级别=1 简洁', settings.snapshot().anim === 1, settings.snapshot().anim);
   chk('默认画面等级=1 标准', settings.snapshot().quality === 1, settings.snapshot().quality);
   settings.next(5);
-  chk('动画级别 简洁->完整', settings.snapshot().anim === 2, settings.snapshot().anim);
+  chk('画面等级 标准->精细', settings.snapshot().quality === 2, settings.snapshot().quality);
   settings.next(5);
-  chk('动画级别 完整->关闭', settings.snapshot().anim === 0, settings.snapshot().anim);
+  chk('画面等级 精细->流畅（绕回）', settings.snapshot().quality === 0, settings.snapshot().quality);
   settings.reset();
+  chk('动画相关设置项已全部移除', settings.indexOf('anim') === -1, settings.indexOf('anim'));
 
   // 回归：菜单曾用 count()-1 取「保留上次函数」，加了两项设置后它指到了「画面等级」，
   // 于是菜单底部开关显示成"标准"。改为按 id 查找后必须钉死这个约束。
@@ -340,14 +340,12 @@ async function runLogic() {
   chk('画面等级「精细」比「流畅」绘制更多图元', mv2 > mv0, '流畅=' + mv0 + ' 精细=' + mv2);
   chk('画面等级切换不产生 NaN', mQ0.bad.length === 0 && mQ2.bad.length === 0);
 
-  // 入场动画：progress 决定横向画到哪
-  const mP30 = makeCtx();
-  plot.draw(mP30.ctx, 304, 304, multi, 0, 81, 66, 8, 0, 0, false, { progress: 0.3 });
-  const mP100 = makeCtx();
-  plot.draw(mP100.ctx, 304, 304, multi, 0, 81, 66, 8, 0, 0, false, { progress: 1 });
-  const ln30 = mP30.ops.filter((o) => o[0] === 'lineTo').length;
-  const ln100 = mP100.ops.filter((o) => o[0] === 'lineTo').length;
-  chk('入场动画 progress=0.3 只画约三成', ln30 < ln100 && ln30 > 0, ln30 + ' vs ' + ln100);
+  // 全程无定时器：源码里不该再出现 setInterval / setTimeout
+  const idxSrcNoAnim = fs.readFileSync(path.join(ROOT, 'entry', 'src', 'main', 'js', 'MainAbility', 'pages', 'index', 'index.js'), 'utf8');
+  // 只认真正的调用（带左括号）—— 注释里提到过 setInterval 这几个字，不算
+  chk('页面源码中没有任何定时器',
+    idxSrcNoAnim.indexOf('setInterval(') === -1 && idxSrcNoAnim.indexOf('setTimeout(') === -1,
+    'setInterval()=' + (idxSrcNoAnim.indexOf('setInterval(') >= 0) + ' setTimeout()=' + (idxSrcNoAnim.indexOf('setTimeout(') >= 0));
 
   // ---- store：从开始界面进入绘图时会 clearAll，这里验证清空语义 ----
   store.clearAll();
@@ -524,8 +522,8 @@ function runGeom() {
   const sry0 = pick(/const sry0 = (\d+);/, 106);
   const obw = pick(/const obw = (\d+);/, 120);
   const obh = pick(/const obh = (\d+);/, 46);
-  const rows = 7;
-  chk('设置界面行数与 settings.ITEMS 一致(7)', rows === 7);
+  const rows = 6;
+  chk('设置界面行数与 settings.ITEMS 一致(6)', rows === 6);
   check('设置界面 标题', center(56), 48, 56, 28);
   check('设置界面 首行', center(srw), sry0 + 3, srw, srh - 6);
   check('设置界面 末行', center(srw), sry0 + (rows - 1) * srh + 3, srw, srh - 6);

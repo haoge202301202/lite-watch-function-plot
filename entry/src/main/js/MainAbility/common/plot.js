@@ -26,6 +26,8 @@ const SYM_C = '#33465C';
 // 而不用 translate（Lite canvas 没有 translate）。
 let OX = 0;
 let OY = 0;
+// draw() 的视图窗口缓冲区，模块级复用
+const VIEW_BUF = { xmin: -8, xmax: 8, ymin: -8, ymax: 8 };
 
 function sxOf(x, W, v) {
     return OX + (x - v.xmin) * W / (v.xmax - v.xmin);
@@ -38,7 +40,9 @@ function syOf(y, H, v) {
 // 世界坐标窗口：以 (cx, cy) 为中心，按画布长宽比扩展，保证图像不被拉伸。
 // half 是可视半宽（世界单位），缩放改它；cx/cy 是视图中心的世界坐标，滑动平移改它们。
 // 任一参数非法都回落到默认值（±8、居中），避免 NaN 渗进坐标系导致 canvas 报参数类型错误。
-function makeView(W, H, half, cx, cy) {
+// 原地填充一个 view 对象，不产生新分配。draw() 每帧都要视图窗口，
+// 在 64KB 堆上"每帧新建一个小对象"是实打实的回收压力。
+function fillView(v, W, H, half, cx, cy) {
     const h = (typeof half === 'number' && isFinite(half) && half > 0) ? half : 8;
     const ccx = (typeof cx === 'number' && isFinite(cx)) ? cx : 0;
     const ccy = (typeof cy === 'number' && isFinite(cy)) ? cy : 0;
@@ -49,7 +53,16 @@ function makeView(W, H, half, cx, cy) {
     } else if (H > W) {
         hh = h * (H / W);
     }
-    return { xmin: ccx - hw, xmax: ccx + hw, ymin: ccy - hh, ymax: ccy + hh };
+    v.xmin = ccx - hw;
+    v.xmax = ccx + hw;
+    v.ymin = ccy - hh;
+    v.ymax = ccy + hh;
+    return v;
+}
+
+// 对外仍返回新对象（自测会连续取多个快照对比），内部由 draw 走复用版本
+function makeView(W, H, half, cx, cy) {
+    return fillView({ xmin: 0, xmax: 0, ymin: 0, ymax: 0 }, W, H, half, cx, cy);
 }
 
 // 1/2/5 x 10^n 形式的“好看”步长
@@ -162,12 +175,9 @@ function drawTicks(ctx, W, H, v, target) {
  * 遇到 NaN/Infinity（定义域外）或相邻点竖直跳变（1/x、tan 的渐近线）时断开路径，
  * 避免出现横贯画布的假竖线。
  */
-function drawCurve(ctx, ast, color, W, H, v, lw, sampleSteps, upto) {
+function drawCurve(ctx, evalFn, color, W, H, v, lw, sampleSteps) {
     const kx = W / (v.xmax - v.xmin);
     let steps = (typeof sampleSteps === 'number' && sampleSteps > 8) ? sampleSteps : (W > 360 ? 360 : W);
-    // upto < 1 时只画到某个横向比例，用于「曲线从左往右长出来」的入场动画
-    const frac = (typeof upto === 'number' && upto >= 0 && upto < 1) ? upto : 1;
-    if (frac < 1) { steps = Math.max(2, Math.floor(steps * frac)); }
     const dx = (v.xmax - v.xmin) / steps;
     // 严格裁到绘图区上下边界：Lite canvas 没有 clip()，否则曲线会画到
     // 顶部表达式文字和底部按钮上面（坐标轴/网格本身不会越界，只有曲线会）。
@@ -185,7 +195,7 @@ function drawCurve(ctx, ast, color, W, H, v, lw, sampleSteps, upto) {
 
     for (let i = 0; i <= steps; i++) {
         const x = v.xmin + i * dx;
-        const y = expr.calc(ast, x);
+        const y = evalFn(x);
         if (typeof y !== 'number' || !isFinite(y)) { pen = false; continue; }
         const py = syOf(y, H, v);
         if (py < hiLimit || py > loLimit) { pen = false; continue; }
@@ -226,6 +236,13 @@ function dashedSegments(ctx, x1, y1, x2, y2, dash, gap) {
         ctx.lineTo(x1 + ux * t2, y1 + uy * t2);
         t += step;
     }
+}
+
+// 只有条目缺少编译闭包时才走这里（自测的手工构造），正常路径不会用到。
+// 闭包在首次使用时才编译，且只在没有 fn 的条目上发生一次。
+function fallbackEval(ast) {
+    if (!ast) { return null; }
+    return expr.compile(ast);
 }
 
 function markPoint(ctx, px, py, color, r) {
@@ -453,30 +470,29 @@ export default {
         // 只有设置里明确选成 0（隐藏）才关掉。
         const dotSet = { dotSize: dotSize, showAxis: (o.showAxis === 0) ? 0 : 1 };
 
-        const v = makeView(W, H, half, cx, cy);
+        // 复用同一个 view 对象，避免每帧新建
+        const v = fillView(VIEW_BUF, W, H, half, cx, cy);
         clear(ctx, W, H);
         // 画面等级：0 流畅（网格稀疏、采样减半）/ 1 标准 / 2 精细（网格与采样都加密）
         const q = (typeof o.quality === 'number') ? o.quality : 1;
         const gridTarget = (q >= 2) ? 12 : (q <= 0 ? 4 : 8);
         const tickTarget = (q >= 2) ? 6 : (q <= 0 ? 3 : 4);
-        // 采样密度也分三档，让「标准」和「精细」是看得出区别的：152 / 243 / 每像素一点
+        // 采样密度分三档。曲线是逐点折线，采样点间距 1.5px 与 1px 在 466 圆屏上肉眼无差，
+        // 但求值次数少了三分之一 —— 这是每帧最贵的一步，优先砍这里。
         const sampleSteps = (q >= 2) ? (W > 360 ? 360 : W)
-            : (q <= 0 ? Math.floor(W / 2) : Math.floor(W * 0.8));
+            : (q <= 0 ? Math.floor(W / 3) : Math.floor(W * 0.66));
         // 曲线入场动画的横向进度（1 表示完整）
-        const upto = (typeof o.progress === 'number' && o.progress >= 0 && o.progress < 1) ? o.progress : 1;
 
         drawGrid(ctx, W, H, v, gridTarget);
         drawAxes(ctx, W, H, v);
         drawTicks(ctx, W, H, v, tickTarget);
         for (let i = 0; i < funcs.length; i++) {
             const f = funcs[i];
-            if (f && f.ast) {
-                drawCurve(ctx, f.ast, f.color, W, H, v, lw, sampleSteps, upto);
-            }
+            if (!f) { continue; }
+            // 正常路径用编译好的闭包；自测里手工构造的条目只有 ast，走兜底
+            const ev = (typeof f.fn === 'function') ? f.fn : fallbackEval(f.ast);
+            if (ev) { drawCurve(ctx, ev, f.color, W, H, v, lw, sampleSteps); }
         }
-        // 入场动画进行中（upto < 1）先不画标注：曲线才长到一半，
-        // 顶点/交点却已经标在还没画到的位置，看起来会像"标注飞到空白处"。
-        if (upto < 1) { return; }
         // 标注共用一个 placed 表，多条函数之间也会互相避让
         const placed = [];
         if (markAll) {

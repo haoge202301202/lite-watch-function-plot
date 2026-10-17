@@ -112,47 +112,15 @@ let startY = 0;
 // 用「键名 + 时间窗」去重，避免一次点击输入两个字符。
 let lastKey = '';
 let lastAt = 0;
+// 编辑页每帧都要判断表达式是否合法，但只有文本变了才需要重新解析。
+// 缓存上一次的文本与结论，避免每次按键都跑一遍词法 + 语法分析。
+let okText = '';
+let okFlag = true;
 
-// ---- 动画状态 ----
-// animT：曲线入场动画的横向进度（1 = 画完）。用 setInterval 推进，
-// 每帧整屏重绘一次；动画级别 < 2 时恒为 1，等于不做动画。
-let animT = 1;
-let animTimer = null;
-// 按下的键（键盘高亮反馈）与其复位定时器
-let pressedKey = '';
-let pressedTimer = null;
-// 界面转场：wipeT 是「已揭开」的比例 —— 0 = 整屏被背景色盖住，1 = 完全显示。
-// 遮罩画在 [W*wipeT, W] 这一段，所以 wipeT 增大时背景色从左往右缩走，形成擦除式入场。
-// canvas 没有 alpha，做不了淡入淡出，只能用这种"揭开"的方式。
-let wipeT = 1;
-let wipeTimer = null;
-
-function stopAnim() {
-    if (animTimer !== null) {
-        clearInterval(animTimer);
-        animTimer = null;
-    }
-    // 关键：中断（页面 onHide、被新的动画顶掉）时必须落回「已画完」，
-    // 否则 animT 停在 0.4 这种中间值，下次重绘只画得出一小截曲线。
-    animT = 1;
-}
-
-function stopPress() {
-    if (pressedTimer !== null) {
-        clearTimeout(pressedTimer);
-        pressedTimer = null;
-    }
-    pressedKey = '';
-}
-
-function stopWipe() {
-    if (wipeTimer !== null) {
-        clearInterval(wipeTimer);
-        wipeTimer = null;
-    }
-    // 同理：中断时把遮罩收干净，否则页面会一直卡着半块背景色
-    wipeT = 1;
-}
+// 本应用**没有任何动画与定时器**。
+// 轻手表的 JS 引擎在 64KB 堆上跑 setInterval 驱动的整屏重绘很容易被压垮：
+// 每次重绘都要重新求值全部曲线，几帧之内就可能触发 OOM 或看门狗。
+// 现在所有交互都是"操作一次、重绘一次"，没有常驻定时器，onHide/onDestroy 也无定时器可清。
 
 // 字号 -> 文字在矩形内垂直居中所需的基线偏移。
 // 早先各处手写偏移（一处 -24*0.35、一处 +9，方向相反）曾让符号整体下坠约 17px，
@@ -206,19 +174,6 @@ export default {
         editMsg = '';
         this.repaint();
         this.boot();
-    },
-
-    // 页面隐藏 / 销毁时务必停掉定时器：动画和工作线程留到后台只会白耗电
-    onHide() {
-        stopAnim();
-        stopPress();
-        stopWipe();
-    },
-
-    onDestroy() {
-        stopAnim();
-        stopPress();
-        stopWipe();
     },
 
     boot() {
@@ -300,11 +255,6 @@ export default {
             this.dbgText = 'err ' + e;
         }
 
-        // 转场遮罩：从左往右揭开。多画 1px 防止浮点误差留缝。
-        if (wipeT < 1) {
-            ctx.fillStyle = BG;
-            ctx.fillRect(W * wipeT, 0, W * (1 - wipeT) + 1, H);
-        }
     },
 
     drawPlot(ctx, W) {
@@ -350,12 +300,14 @@ export default {
                 } catch (e2) {
                     qf.quad = null;
                 }
+                // 多项式分析只做这一次；之后绘图全走编译好的 fn，AST 可以释放掉，
+                // 每条曲线省下十几个对象 —— 64KB 堆上这点很值。
+                qf.ast = null;
             }
         }
 
         // 最后一个参数 markAll：全部模式下每条二次函数都标顶点，单条模式只标当前这条
         const opt = settings.snapshot();
-        opt.progress = animT;   // 入场动画的横向进度（1 = 完整）
         plot.draw(ctx, s, s, (single >= 0) ? [list[single]] : list,
             (single >= 0) ? 0 : ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, single < 0, opt);
 
@@ -388,7 +340,7 @@ export default {
             ctx.fillText(clip(plot.describeAll(list), 32), W / 2, oy + s + 14);
         }
 
-        hotZones = [];
+        hotZones.length = 0;
 
         // 绘图区上角一排小键：左上角「返」回开始界面，右上角两个缩放。
         // 圆屏四角本来就被裁切，这三块是天然空位（最远角距圆心约 215px，余量约 18px），
@@ -459,7 +411,7 @@ export default {
 
     // 开始界面：两个大按钮（进入绘图 / 设置）
     drawHome(ctx, W) {
-        hotZones = [];
+        hotZones.length = 0;
 
         // 顶部装饰：一条开口向上的抛物线，点题又不抢标题
         const dw = 140;
@@ -521,16 +473,16 @@ export default {
 
     // 设置界面：逐行列出，点一行就切到下一个取值
     drawSettings(ctx, W) {
-        hotZones = [];
+        hotZones.length = 0;
 
         ctx.textAlign = 'center';
         ctx.fillStyle = FG;
         ctx.font = '28px HarmonyOS Sans';
         ctx.fillText('设置', W / 2, 70);
 
-        // 7 项之后纵向很紧：行高压到 43、起始上提到 92，才装得下（末行底边 393，返回键 401..439）
+        // 去掉「动画级别」后回到 6 项，行高从 43 放宽到 48（末行底边 380，返回键 388..428）
         const srw = 300;
-        const srh = 43;
+        const srh = 48;
         const srx = (W - srw) / 2;
         const sry0 = 92;
         const n = settings.count();
@@ -556,7 +508,7 @@ export default {
         }
 
         const obw = 120;
-        const obh = 38;
+        const obh = 40;
         const obx = (W - obw) / 2;
         const oby = sry0 + n * srh + 8;
         card(ctx, obx, oby, obw, obh, CARD);
@@ -580,7 +532,11 @@ export default {
         } else {
             // 带上 y= 前缀，和最终存下来的形式一致；非法时整串变红
             txt = 'y = ' + editText;
-            color = store.check(editText).ok ? FG : ERR;
+            if (editText !== okText) {
+                okText = editText;
+                okFlag = store.check(editText).ok;
+            }
+            color = okFlag ? FG : ERR;
         }
         // 超长时保留尾部而不是头部：用户刚敲的字符在后半段，截掉开头才看得见自己在打什么
         if (txt.length > 20) { txt = '\u2026' + txt.substring(txt.length - 19); }
@@ -597,61 +553,7 @@ export default {
                 if (String(hotZones[i]) === '取消') { hotZones[i] = '删除'; }
             }
         }
-        keypad.draw(ctx, W, this.ch, hotZones, pressedKey);
-    },
-
-    // 曲线从左往右「长出来」的入场动画。动画级别 < 2 时直接画完整，不启动定时器。
-    // 调用方负责随后 repaint 一次（animT 此时是 0，第一帧几乎空白，正是入场起点）。
-    startAnim() {
-        stopAnim();
-        if (settings.snapshot().anim < 2) {
-            animT = 1;
-            return;
-        }
-        const self = this;
-        animT = 0;
-        animTimer = setInterval(function () {
-            animT = animT + 0.16;
-            if (animT >= 1) {
-                animT = 1;
-                stopAnim();
-            }
-            self.repaint();
-        }, 40);
-    },
-
-    // 界面切换的擦除式转场。动画级别 < 2 时立即完成，等于无转场。
-    startWipe() {
-        stopWipe();
-        if (settings.snapshot().anim < 2) {
-            wipeT = 1;
-            return;
-        }
-        const self = this;
-        wipeT = 0;
-        wipeTimer = setInterval(function () {
-            wipeT = wipeT + 0.18;
-            if (wipeT >= 1) {
-                wipeT = 1;
-                stopWipe();
-            }
-            self.repaint();
-        }, 32);
-    },
-
-    // 按键高亮反馈：只在编辑键盘上做 —— 绘图页的按钮会牵动整条曲线重绘，太重。
-    flashKey(label) {
-        if (mode !== EDIT_MODE) { return; }
-        if (settings.snapshot().anim < 1) { return; }
-        stopPress();
-        pressedKey = String(label);
-        const self = this;
-        this.repaint();
-        pressedTimer = setTimeout(function () {
-            pressedKey = '';
-            pressedTimer = null;
-            self.repaint();
-        }, 140);
+        keypad.draw(ctx, W, this.ch, hotZones);
     },
 
     // 左右键：在「全部」与逐条之间循环。同时把选中项同步过去，
@@ -661,7 +563,6 @@ export default {
         if (n === 0) { return; }
         focusPos = focus.stepFocusPos(focusPos, n, dir);
         if (focusPos > 0) { store.setCur(focusPos - 1); }
-        this.startAnim();
         this.repaint();
     },
 
@@ -741,7 +642,6 @@ export default {
     },
 
     act(a) {
-        this.flashKey(a);
         if (a === 'gotoPlot') {
             // 开关决定「每次重来」还是「接着上次」：
             //   每次重来 —— 清空函数并把缩放/平移/焦点一起复位；
@@ -754,19 +654,16 @@ export default {
                 zoomIdx = ZOOM_BASE;
             }
             mode = PLOT_MODE;
-            this.startAnim();
             this.repaint();
             return;
         }
         if (a === 'gotoSettings') {
             mode = SETTINGS_MODE;
-            this.startWipe();
             this.repaint();
             return;
         }
         if (a === 'home') {
             mode = HOME_MODE;
-            this.startWipe();
             this.repaint();
             return;
         }
@@ -843,7 +740,6 @@ export default {
         editIdx = -1;
         // 保存后直接聚焦到刚保存的那条，按一下就看得见结果
         focusPos = store.getCur() + 1;
-        this.startAnim();
         this.repaint();
     }
 };

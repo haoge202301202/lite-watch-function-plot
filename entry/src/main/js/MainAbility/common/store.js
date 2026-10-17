@@ -24,6 +24,8 @@ function makeItem(src, colorIdx) {
     return {
         src: r.body,
         text: 'y=' + r.body,
+        // fn：编译好的求值闭包，绘图时逐点调用（比每次走 AST 递归快得多）
+        fn: r.fn,
         ast: r.ast,
         color: COLORS[colorIdx % COLORS.length],
         quad: null,

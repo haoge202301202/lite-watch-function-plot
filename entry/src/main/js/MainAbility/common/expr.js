@@ -285,6 +285,56 @@ function evalNode(node, x) {
     return NaN;
 }
 
+/**
+ * 把 AST 编译成闭包树，供绘图时逐点求值。
+ *
+ * 为什么值得：一条曲线每帧要按像素求值几百次，递归 + switch 分发的开销很可观；
+ * 编译成闭包后每次求值只是若干次直接函数调用。
+ * 内存上并没有变差 —— 编译完就可以把 AST 丢掉（多项式分析只需在保存时做一次），
+ * 闭包数量和原来的 AST 节点数量相当。
+ */
+function compile(node) {
+    if (!node) { return function () { return NaN; }; }
+    const t = node.t;
+    if (t === 'num') {
+        const v = node.v;
+        return function () { return v; };
+    }
+    if (t === 'var') {
+        return function (x) { return x; };
+    }
+    if (t === 'neg') {
+        const a = compile(node.a);
+        return function (x) { return -a(x); };
+    }
+    if (t === 'add') {
+        const a = compile(node.a), b = compile(node.b);
+        return function (x) { return a(x) + b(x); };
+    }
+    if (t === 'sub') {
+        const a = compile(node.a), b = compile(node.b);
+        return function (x) { return a(x) - b(x); };
+    }
+    if (t === 'mul') {
+        const a = compile(node.a), b = compile(node.b);
+        return function (x) { return a(x) * b(x); };
+    }
+    if (t === 'div') {
+        const a = compile(node.a), b = compile(node.b);
+        return function (x) { return a(x) / b(x); };
+    }
+    if (t === 'pow') {
+        const a = compile(node.a), b = compile(node.b);
+        return function (x) { return Math.pow(a(x), b(x)); };
+    }
+    if (t === 'call') {
+        const f = node.f;
+        const a = compile(node.a);
+        return function (x) { return callFn(f, a(x)); };
+    }
+    return function () { return NaN; };
+}
+
 // 去掉全部空白字符
 function squeeze(src) {
     let s = '';
@@ -334,7 +384,8 @@ export default {
         if (ast === null) {
             return { ok: false, msg: '表达式格式有误' };
         }
-        return { ok: true, ast: ast, body: body };
+        return { ok: true, ast: ast, body: body, fn: compile(ast) };
     },
-    calc: evalNode
+    calc: evalNode,
+    compile: compile
 };

@@ -20,7 +20,7 @@ const ITEMS = [
     // 每次进入绘图是否清空上次的函数。默认 0（每次重来），与 v1.9.0 的行为一致。
     { id: 'keepLast', label: '保留上次函数', values: [0, 1], def: 0, texts: ['每次重来', '接着上次'], unit: '' },
     // 动画级别：0 关闭（省电、最跟手）/ 1 简洁（按键反馈）/ 2 完整（再加曲线绘制动画）
-    { id: 'anim', label: '动画级别', values: [0, 1, 2], def: 1, texts: ['关闭', '简洁', '完整'], unit: '' },
+
     // 画面等级：影响网格密度、刻度数量、曲线采样密度
     { id: 'quality', label: '画面等级', values: [0, 1, 2], def: 1, texts: ['流畅', '标准', '精细'], unit: '' }
 ];
@@ -38,6 +38,10 @@ function valOf(id) {
     const i = POS[id];
     return (i === undefined) ? 0 : ITEMS[i].values[idxs[i]];
 }
+
+// snapshot() 每次重绘都会调用一次，返回的对象是只读的。
+// 缓存起来复用同一个对象，避免每帧都分配一个 6 字段的对象（64KB 堆上很宝贵）。
+let snapCache = null;
 
 function clampIdx(i, v) {
     const n = ITEMS[i].values.length;
@@ -88,6 +92,7 @@ export default {
         if (i < 0 || i >= ITEMS.length) { return; }
         const n = ITEMS[i].values.length;
         idxs[i] = (idxs[i] + 1) % n;
+        snapCache = null;
         persist();
     },
 
@@ -95,15 +100,16 @@ export default {
     snapshot: function () {
         // 按 id 取值而不是写死下标：之前菜单用 count()-1 定位「保留上次函数」，
         // 后来加了两项设置，它就悄悄指到了「画面等级」上。
-        return {
+        if (snapCache !== null) { return snapCache; }
+        snapCache = {
             width: valOf('width'),
             showRoots: valOf('showRoots'),
             dotSize: valOf('dotSize'),
             showAxis: valOf('showAxis'),
             keepLast: valOf('keepLast'),
-            anim: valOf('anim'),
             quality: valOf('quality')
         };
+        return snapCache;
     },
 
     load: function (cb) {
@@ -117,6 +123,7 @@ export default {
                         for (let i = 0; i < ITEMS.length && i < arr.length; i++) {
                             idxs[i] = clampIdx(i, parseInt(arr[i], 10));
                         }
+                        snapCache = null;
                     }
                     if (cb) { cb(); }
                 },
@@ -130,9 +137,11 @@ export default {
     // --- 以下两个只给自测用 ---
     reset: function () {
         for (let i = 0; i < ITEMS.length; i++) { idxs[i] = ITEMS[i].def; }
+        snapCache = null;
     },
     setIdx: function (i, k) {
         if (i < 0 || i >= ITEMS.length) { return; }
         idxs[i] = clampIdx(i, k);
+        snapCache = null;
     }
 };
