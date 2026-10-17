@@ -222,7 +222,7 @@ async function runLogic() {
 
   const mMark = makeCtx();
   let threwMark = null;
-  try { plot.draw(mMark.ctx, 304, 304, multi, 0, 81, 66, 8, 0, 0, true); } catch (e) { threwMark = e.message; }
+  try { plot.draw(mMark.ctx, 304, 304, multi, 0, 81, 66, 8, 0, 0, true, { showAxis: 1 }); } catch (e) { threwMark = e.message; }
   chk('全部模式绘制不抛异常且无 NaN', threwMark === null && mMark.bad.length === 0,
     threwMark || mMark.bad.slice(0, 4).join(','));
   const markTexts = mMark.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
@@ -235,7 +235,7 @@ async function runLogic() {
   // 曲线 <= 2 条时才额外标交点/截距
   const twoQuads = multi.slice(0, 2);
   const mTwo = makeCtx();
-  plot.draw(mTwo.ctx, 304, 304, twoQuads, 0, 81, 66, 8, 0, 0, true);
+  plot.draw(mTwo.ctx, 304, 304, twoQuads, 0, 81, 66, 8, 0, 0, true, { showAxis: 1 });
   const twoTexts = mTwo.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
   chk('2 条曲线标出 2 个顶点',
     twoTexts.filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0).length === 2,
@@ -250,7 +250,7 @@ async function runLogic() {
 
   // 单条模式（markAll=false）只标当前那条
   const mOne = makeCtx();
-  plot.draw(mOne.ctx, 304, 304, multi, 1, 81, 66, 8, 0, 0, false);
+  plot.draw(mOne.ctx, 304, 304, multi, 1, 81, 66, 8, 0, 0, false, { showAxis: 1 });
   const oneLabels = mOne.ops.filter((o) => o[0] === 'fillText').map((o) => o[1])
     .filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0);
   chk('单条模式只标 1 个顶点', oneLabels.length === 1, JSON.stringify(oneLabels));
@@ -259,9 +259,15 @@ async function runLogic() {
   chk('≥3 条全部模式不画对称轴', !hasVerticalDash(mMark.ops));
 
   // 非二次函数不该有对称轴
+  // 非二次函数：即使显式开启对称轴也不该画
   const mNonQuad = makeCtx();
-  plot.draw(mNonQuad.ctx, 304, 304, [multi[2]], 0, 81, 66, 8, 0, 0, false);
-  chk('非二次函数不画对称轴', !hasVerticalDash(mNonQuad.ops));
+  plot.draw(mNonQuad.ctx, 304, 304, [multi[2]], 0, 81, 66, 8, 0, 0, false, { showAxis: 1 });
+  chk('非二次函数即使开启也不画对称轴', !hasVerticalDash(mNonQuad.ops));
+
+  // 默认（不传 opts）应与设置默认一致：不画对称轴
+  const mDefaultAxis = makeCtx();
+  plot.draw(mDefaultAxis.ctx, 304, 304, twoQuads, 0, 81, 66, 8, 0, 0, true);
+  chk('不传 opts 时默认不画对称轴（与设置默认一致）', !hasVerticalDash(mDefaultAxis.ops));
 
   // ---- 设置项：默认值必须与改版前的外观一致，循环切换要能绕回 ----
   settings.reset();
@@ -508,10 +514,9 @@ function runGeom() {
   const kby = pick(/const kby = (\d+);/, 356);
   const homeTitleY = pick(/ctx\.fillText\('函数绘图', W \/ 2, (\d+)\);/, 96);
   const homeSubY = pick(/ctx\.fillText\('高中数学函数图像', W \/ 2, (\d+)\);/, 124);
-  const dw = pick(/const dw = (\d+);/, 140);
-  const dy0 = pick(/const dy0 = (\d+);/, 34);
-  const dh = pick(/const dh = (\d+);/, 26);
-  check('开始界面 装饰抛物线', center(dw), dy0 - 2, dw, dh + 4);
+  // 菜单底部那行「画布 W × H」诊断文字（装饰抛物线已在 v1.15 移除，这里改查它）
+  const diagY = pick(/ctx\.fillText\('画布 ' \+ W \+ ' × ' \+ this\.ch, W \/ 2, (\d+)\);/, 434);
+  check('开始界面 画布尺寸诊断行', center(140), diagY - 12, 140, 14);
   check('开始界面 标题', center(128), homeTitleY - 26, 128, 32);
   check('开始界面 副标题', center(120), homeSubY - 12, 120, 15);
   check('开始界面 按钮1(进入绘图)', center(hbw), hy1, hbw, hbh);

@@ -502,9 +502,10 @@ export default {
         const lw = (typeof o.width === 'number' && o.width > 0) ? o.width : 3;
         const wantRoots = (o.showRoots !== 0);
         const dotSize = (typeof o.dotSize === 'number' && o.dotSize > 0) ? o.dotSize : 3;
-        // showAxis 默认 1：不传 opts 时要保持「对称轴照画」的既有行为，
-        // 只有设置里明确选成 0（隐藏）才关掉。
-        const dotSet = { dotSize: dotSize, showAxis: (o.showAxis === 0) ? 0 : 1 };
+        // showAxis 默认 0（不画），与 settings 里的默认值保持一致。
+        // 早先这里默认是 1，而设置默认是 0 —— 应用运行时因为总是传 snapshot() 所以看不出问题，
+        // 但直接调 plot.draw 会得到与界面上不同的结果，属于埋雷。
+        const dotSet = { dotSize: dotSize, showAxis: (o.showAxis === 1) ? 1 : 0 };
 
         // 复用同一个 view 对象，避免每帧新建
         const v = fillView(VIEW_BUF, W, H, half, cx, cy);
