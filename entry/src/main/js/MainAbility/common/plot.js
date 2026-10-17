@@ -60,8 +60,13 @@ function niceStep(range, target) {
     return m * p;
 }
 
+// 无 measureText：中文/全角按一个字号宽，半角按 0.56 字号估算
 function textWidth(s, fs) {
-    return s.length * fs * 0.56;
+    let w = 0;
+    for (let i = 0; i < s.length; i++) {
+        w += s.charCodeAt(i) > 127 ? fs : fs * 0.56;
+    }
+    return w;
 }
 
 function clear(ctx, W, H) {
@@ -158,8 +163,10 @@ function drawCurve(ctx, ast, color, W, H, v) {
     const kx = W / (v.xmax - v.xmin);
     const steps = W > 360 ? 360 : W;
     const dx = (v.xmax - v.xmin) / steps;
-    const hiLimit = -H;
-    const loLimit = H * 2;
+    // 严格裁到绘图区上下边界：Lite canvas 没有 clip()，否则曲线会画到
+    // 顶部表达式文字和底部按钮上面（坐标轴/网格本身不会越界，只有曲线会）。
+    const hiLimit = OY - 1;
+    const loLimit = OY + H + 1;
 
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
@@ -175,7 +182,9 @@ function drawCurve(ctx, ast, color, W, H, v) {
         const py = syOf(y, H, v);
         if (py < hiLimit || py > loLimit) { pen = false; continue; }
         if (pen && Math.abs(py - lastPy) > H) { pen = false; }
-        const px = (x - v.xmin) * kx;
+        // 必须加上 OX：sxOf/syOf 都带偏移，这里手算若漏掉会让整条曲线左移一个 OX，
+        // 表现为「曲线和坐标系对不上」，很容易被误判成函数画错了。
+        const px = OX + (x - v.xmin) * kx;
         if (pen) {
             ctx.lineTo(px, py);
         } else {
@@ -192,83 +201,142 @@ function markPoint(ctx, px, py, color, r) {
     ctx.fillRect(px - r, py - r, r * 2 + 1, r * 2 + 1);
 }
 
-// place: 'right' | 'left' | 'above' | 'below'
-function drawLabel(ctx, text, px, py, color, place, W, H) {
-    const fs = 15;
-    ctx.font = fs + 'px sans-serif';
-    ctx.fillStyle = color;
-    const w = textWidth(text, fs);
-    let ax = px;
-    let ay = py;
+// 标签包围盒（绝对坐标，已含 OX/OY 偏移）；超出绘图区则返回 null
+function labelBox(place, px, py, w, h, W, H) {
+    const left = OX + 2;
+    const top = OY + 2;
+    const right = OX + W - 2;
+    const bottom = OY + H - 2;
+    let x0, y0, tx, ty, align;
     if (place === 'right') {
-        ctx.textAlign = 'left';
-        ax = px + 7;
-        ay = py + 5;
-        if (ax + w > W - 2) { ctx.textAlign = 'right'; ax = px - 7; }
+        x0 = px + 7; y0 = py - h / 2; tx = px + 7; ty = py + 5; align = 'left';
     } else if (place === 'left') {
-        ctx.textAlign = 'right';
-        ax = px - 7;
-        ay = py + 5;
-        if (ax - w < 2) { ctx.textAlign = 'left'; ax = px + 7; }
+        x0 = px - 7 - w; y0 = py - h / 2; tx = px - 7; ty = py + 5; align = 'right';
     } else if (place === 'below') {
-        ctx.textAlign = 'center';
-        ay = py + fs + 8;
-        if (ay > H - 2) { ay = py - 7; }
-        if (ax - w / 2 < 2) { ax = w / 2 + 2; }
-        if (ax + w / 2 > W - 2) { ax = W - 2 - w / 2; }
+        x0 = px - w / 2; y0 = py + 8; tx = px; ty = py + 22; align = 'center';
     } else {
-        ctx.textAlign = 'center';
-        ay = py - 8;
-        if (ay < fs) { ay = py + fs + 8; }
-        if (ax - w / 2 < 2) { ax = w / 2 + 2; }
-        if (ax + w / 2 > W - 2) { ax = W - 2 - w / 2; }
+        x0 = px - w / 2; y0 = py - 8 - h; tx = px; ty = py - 8; align = 'center';
     }
-    ctx.fillText(text, ax, ay);
+    if (x0 < left || x0 + w > right || y0 < top || y0 + h > bottom) { return null; }
+    return { x: x0, y: y0, w: w, h: h, tx: tx, ty: ty, align: align };
+}
+
+function overlapsAny(box, placed) {
+    for (let i = 0; i < placed.length; i++) {
+        const p = placed[i];
+        if (box.x < p.x + p.w && box.x + box.w > p.x &&
+            box.y < p.y + p.h && box.y + box.h > p.y) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * 依次尝试候选方位放置标签，避开已占用区域；都放不下就放弃（只留点不写字）。
+ * 这是解决「顶点 / x 交点 / y 截距落在同一点」时文字互相覆盖的关键。
+ */
+function putLabel(ctx, text, px, py, color, W, H, placed, orders) {
+    const fs = 15;
+    const w = textWidth(text, fs);
+    const h = fs + 4;
+    for (let i = 0; i < orders.length; i++) {
+        const box = labelBox(orders[i], px, py, w, h, W, H);
+        if (!box) { continue; }
+        if (overlapsAny(box, placed)) { continue; }
+        placed.push(box);
+        ctx.font = fs + 'px sans-serif';
+        ctx.fillStyle = color;
+        ctx.textAlign = box.align;
+        ctx.fillText(text, box.tx, box.ty);
+        return true;
+    }
+    return false;
 }
 
 /**
  * 二次函数的特殊点：顶点（最大值/最小值）与坐标轴交点。
  * 其他函数按需求不画特殊点。
+ *
+ * 顶点、x 交点、y 截距可能落在同一点（例如 y = -x^2 三者都在原点），
+ * 所以：点按优先级绘制，让顶点压在最上层；文字先比间距再比包围盒，
+ * 距离过近或位置冲突就不再重复书写，避免出现「最(0(0)0)」这种重叠。
  */
 function drawQuadPoints(ctx, quad, W, H, v) {
+    const placed = [];
+    // 只有点几乎完全重合（< 6px）时才放弃重复标注；稍远一些就交给 putLabel
+    // 的方位尝试去避让，避免把「数值不同但位置接近」的坐标误丢。
+    const MIN_SEP = 6;
+
     function inView(x, y) {
         return x >= v.xmin && x <= v.xmax && y >= v.ymin && y <= v.ymax;
     }
 
-    // 顶点：写清是最大值还是最小值
     const vx = quad.vertex.x;
     const vy = quad.vertex.y;
-    if (inView(vx, vy)) {
-        const px = sxOf(vx, W, v);
-        const py = syOf(vy, H, v);
-        markPoint(ctx, px, py, VERTEX_C, 4);
-        const tag = (quad.isMin ? '最小' : '最大') +
-            '(' + num.fmt2(vx) + ',' + num.fmt2(vy) + ')';
-        drawLabel(ctx, tag, px, py, VERTEX_C, quad.isMin ? 'below' : 'above', W, H);
+    const showVertex = inView(vx, vy);
+    const vpx = showVertex ? sxOf(vx, W, v) : 0;
+    const vpy = showVertex ? syOf(vy, H, v) : 0;
+
+    // 点：先画低优先级，顶点最后画，重合时顶点在上面
+    const cy = quad.yIntercept;
+    let ypx = 0, ypy = 0, showY = false;
+    if (inView(0, cy) && Math.abs(cy) > 1e-9) {
+        ypx = sxOf(0, W, v);
+        ypy = syOf(cy, H, v);
+        showY = true;
+        markPoint(ctx, ypx, ypy, YINT_C, 3);
     }
 
-    // 与 x 轴的交点；两点很近时错开上下，避免文字重叠
-    const py0 = syOf(0, H, v);
     const rn = quad.roots.length;
-    let prevPx = -9999;
+    const rp = [];
     for (let i = 0; i < rn; i++) {
         const rx = quad.roots[i];
-        if (!inView(rx, 0)) { continue; }
+        if (!inView(rx, 0)) { rp.push(null); continue; }
         const px = sxOf(rx, W, v);
-        markPoint(ctx, px, py0, ROOT_C, 3);
-        let place = 'below';
-        if (i > 0 && Math.abs(px - prevPx) < 96) { place = 'above'; }
-        drawLabel(ctx, '(' + num.fmt2(rx) + ',0)', px, py0, ROOT_C, place, W, H);
-        prevPx = px;
+        const py = syOf(0, H, v);
+        rp.push([px, py]);
+        markPoint(ctx, px, py, ROOT_C, 3);
     }
 
-    // 与 y 轴的交点
-    const cy = quad.yIntercept;
-    if (inView(0, cy) && Math.abs(cy) > 1e-9) {
-        const px = sxOf(0, W, v);
-        const py = syOf(cy, H, v);
-        markPoint(ctx, px, py, YINT_C, 3);
-        drawLabel(ctx, '(0,' + num.fmt2(cy) + ')', px, py, YINT_C, 'left', W, H);
+    if (showVertex) {
+        markPoint(ctx, vpx, vpy, VERTEX_C, 4);
+    }
+
+    // 文字：顶点优先，其后交点和截距
+    if (showVertex) {
+        const tag = (quad.isMin ? '最小' : '最大') +
+            '(' + num.fmt2(vx) + ',' + num.fmt2(vy) + ')';
+        putLabel(ctx, tag, vpx, vpy, VERTEX_C, W, H, placed,
+            quad.isMin ? ['below', 'above', 'right', 'left'] : ['above', 'below', 'right', 'left']);
+    }
+
+    for (let i = 0; i < rp.length; i++) {
+        const r = rp[i];
+        if (!r) { continue; }
+        // 和顶点几乎重合时只画点，不重复写字
+        if (showVertex && Math.abs(r[0] - vpx) < MIN_SEP && Math.abs(r[1] - vpy) < MIN_SEP) {
+            continue;
+        }
+        putLabel(ctx, '(' + num.fmt2(quad.roots[i]) + ',0)', r[0], r[1], ROOT_C, W, H, placed,
+            ['below', 'above', 'right', 'left']);
+    }
+
+    if (showY) {
+        let skip = false;
+        if (showVertex && Math.abs(ypx - vpx) < MIN_SEP && Math.abs(ypy - vpy) < MIN_SEP) {
+            skip = true;
+        }
+        for (let i = 0; i < rp.length && !skip; i++) {
+            const r = rp[i];
+            if (r && Math.abs(ypx - r[0]) < MIN_SEP && Math.abs(ypy - r[1]) < MIN_SEP) {
+                skip = true;
+            }
+        }
+        if (!skip) {
+            putLabel(ctx, '(0,' + num.fmt2(cy) + ')', ypx, ypy, YINT_C, W, H, placed,
+                ['left', 'right', 'above']);
+        }
     }
 }
 

@@ -145,10 +145,17 @@ export default {
         const oy = 54;
         const it = store.curItem();
 
+        // 顶部标题带上「序号/总数」：切换曲线时数字变化，是 prev / next 生效的直接反馈
+        const total = store.count();
+        const ci = store.getCur();
+        let head = HINT;
+        if (it) {
+            head = clip(it.text, 14) + '   ' + (ci + 1) + '/' + total;
+        }
         ctx.font = '20px sans-serif';
         ctx.fillStyle = it ? FG : DIM;
         ctx.textAlign = 'center';
-        ctx.fillText(it ? clip(it.text, 18) : HINT, W / 2, 30);
+        ctx.fillText(head, W / 2, 30);
 
         // 二次函数特殊点：惰性计算（store 不依赖 poly）
         if (it && !it.quad) {
