@@ -473,14 +473,17 @@ export default {
         // 复用同一个 view 对象，避免每帧新建
         const v = fillView(VIEW_BUF, W, H, half, cx, cy);
         clear(ctx, W, H);
-        // 画面等级：0 流畅（网格稀疏、采样减半）/ 1 标准 / 2 精细（网格与采样都加密）
+        // 画面等级：0 流畅 / 1 标准 / 2 精细。三个参数直接决定每帧的 canvas 调用次数，
+        // 而调用次数是本应用在真机上最敏感的指标（一次重绘上千次调用会撑不住）。
+        // 已经整体下调过一轮：曲线采样减半、网格与刻度都更稀。
         const q = (typeof o.quality === 'number') ? o.quality : 1;
-        const gridTarget = (q >= 2) ? 12 : (q <= 0 ? 4 : 8);
-        const tickTarget = (q >= 2) ? 6 : (q <= 0 ? 3 : 4);
-        // 采样密度分三档。曲线是逐点折线，采样点间距 1.5px 与 1px 在 466 圆屏上肉眼无差，
-        // 但求值次数少了三分之一 —— 这是每帧最贵的一步，优先砍这里。
-        const sampleSteps = (q >= 2) ? (W > 360 ? 360 : W)
-            : (q <= 0 ? Math.floor(W / 3) : Math.floor(W * 0.66));
+        const gridTarget = (q >= 2) ? 8 : (q <= 0 ? 3 : 6);
+        const tickTarget = (q >= 2) ? 4 : (q <= 0 ? 2 : 3);
+        // 曲线采样分三档。每个采样点都是一次 lineTo（外加一次表达式求值），
+        // 这是每帧最大的开销来源，所以砍得最狠：标准档 304px 画布上约每 3 像素一个点，
+        // 折线看上去依然是光滑曲线，但 lineTo 次数从 304 降到 100。
+        const sampleSteps = (q >= 2) ? Math.floor(W * 0.66)
+            : (q <= 0 ? Math.floor(W / 5) : Math.floor(W / 3));
         // 曲线入场动画的横向进度（1 表示完整）
 
         drawGrid(ctx, W, H, v, gridTarget);

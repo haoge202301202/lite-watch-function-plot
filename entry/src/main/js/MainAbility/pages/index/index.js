@@ -62,8 +62,12 @@ const HINT = '点 + 添加函数';
 // 单次步进保持原来的 1.33~1.5 倍节奏（不改手感），只把两端各扩几档：
 // 下调到 ±0.5 以便放大看顶点/交点附近的局部曲率；上调到 ±48 以便看整体走势。
 // 不再放到 ±64 以上：那时每个采样点跨度超过 0.5 个世界单位，sin/tan 会明显欠采样成锯齿。
-const ZOOMS = [0.5, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48];
-const ZOOM_BASE = 7;
+// 收紧过的档位：两端极端值已去掉 ——
+//   ±0.5 放大过度，网格/刻度会挤成一团；
+//   ±32 / ±48 缩得太远，采样点间距超过 1 个世界单位，sin/tan 直接成锯齿。
+// 现在 ±1 … ±24，默认 ±8（index 6）。
+const ZOOMS = [1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24];
+const ZOOM_BASE = 6;
 // 24px 字形在按钮内垂直居中的基线偏移量。
 // 底部主按钮与缩放键必须共用这一个常量：两处曾各写各的（一处 -24*0.35、一处 +9），
 // 导致缩放键的 +/- 整体下坠约 17px，看起来像"符号掉到了按钮边缘外"。
@@ -126,6 +130,18 @@ function vMid(fs) {
     return -fs * 0.35;
 }
 
+// 画布边长必须落在合理区间：
+//   低于 200 排不下现有布局；
+//   高于 480 说明拿到的多半不是逻辑像素（某些固件返回物理像素），
+//   那样画布会远大于屏幕，绘制坐标与绘制量都会按面积放大 —— 直接夹住。
+function clampSize(v) {
+    const n = Math.floor(v);
+    if (!(n > 0)) { return 0; }
+    if (n < 200) { return 200; }
+    if (n > 480) { return 480; }
+    return n;
+}
+
 function nowMs() {
     return (typeof Date.now === 'function') ? Date.now() : new Date().getTime();
 }
@@ -178,9 +194,13 @@ export default {
         try {
             Device.getInfo({
                 success: function (info) {
-                    if (info && info.windowWidth) {
-                        self.cw = info.windowWidth;
-                        self.ch = info.windowHeight || info.windowWidth;
+                    if (info && info.windowWidth > 0) {
+                        const w = clampSize(info.windowWidth);
+                        const h = clampSize(info.windowHeight || info.windowWidth);
+                        if (w > 0 && h > 0) {
+                            self.cw = w;
+                            self.ch = h;
+                        }
                     }
                     self.repaint();
                 },
@@ -307,6 +327,20 @@ export default {
         const opt = settings.snapshot();
         plot.draw(ctx, s, s, (single >= 0) ? [list[single]] : list,
             (single >= 0) ? 0 : ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, single < 0, opt);
+
+        // 正在平移时盖一个提示条：拖动过程中视图不再刷新，得让用户知道手势被识别了、
+        // 松开手指才会生效。这是 canvas 上的唯一"界面反馈"，不涉及定时器。
+        if (dragging) {
+            const tw = 132;
+            const th = 40;
+            const tx = (W - tw) / 2;
+            const ty = oy + s / 2 - th / 2;
+            card(ctx, tx, ty, tw, th, CARD);
+            ctx.fillStyle = FG;
+            ctx.font = '18px HarmonyOS Sans';
+            ctx.textAlign = 'center';
+            ctx.fillText('平移中…', W / 2, ty + th / 2 + vMid(18));
+        }
 
         // 绘图区描边：把坐标系和页面背景分开。
         // 必须画在 plot.draw 之后 —— 它内部的 clear() 按 OX/OY 铺了整块底色，会盖掉先画的东西。
@@ -466,6 +500,13 @@ export default {
         ctx.fillStyle = MUTED;
         ctx.fillText('>', hbx + hbw - 18, kby + kbh / 2 + vMid(19));
         hotZones.push(hbx, kby, hbw, kbh, 'set' + keepIdx);
+
+        // 诊断：显示实际拿到的画布尺寸。用来确认 Device.getInfo 的 windowWidth
+        // 到底是逻辑像素还是物理像素 —— 明显偏大就说明画布画到了屏幕之外。
+        ctx.fillStyle = MUTED;
+        ctx.font = '14px HarmonyOS Sans';
+        ctx.textAlign = 'center';
+        ctx.fillText('画布 ' + W + ' × ' + this.ch, W / 2, 434);
     },
 
     // 设置界面：逐行列出，点一行就切到下一个取值
@@ -588,6 +629,7 @@ export default {
         // 手指在按钮上抖动几下再回到原处，累加值会超标从而把点击误判成拖动，按钮就静默失效了。
         const moved = Math.abs(e.globalX - startX) + Math.abs(e.globalY - startY);
         if (moved < DRAG_MIN) { return; }
+        const first = !dragging;
         dragging = true;
         const s = this.side();
         if (!(s > 0)) { return; }
@@ -595,11 +637,15 @@ export default {
         const k = 2 * ZOOMS[zoomIdx] / s;
         viewCx = clampPan(viewCx - dx * k);
         viewCy = clampPan(viewCy + dy * k);
-        // 关键：touchmove 期间**一次都不重绘**。
+        // 关键：touchmove 期间**不做连续重绘**。
         // touchmove 是所有事件里唯一高频触发的（手指一动就是几十上百次），
-        // 而每次重绘都要清屏 + 重算网格/坐标轴/全部曲线/标注。之前在这里限流 90ms 重绘
-        // （约每秒 11 次整屏重绘），真机上平移必崩。现在这里只做纯算术累加，
-        // 视图真正的重绘放到 onTE —— 一次手势只画一帧。
+        // 而每次重绘都要清屏 + 重算网格/坐标轴/全部曲线/标注，真机上撑不住。
+        // 这里只在「刚开始拖动」的那一下画一帧（画面会盖上"平移中"提示），
+        // 之后全程只做纯算术累加；松手时（onTE）再画一帧真实内容。
+        // 一次手势总共只有 2 次重绘。
+        if (first) {
+            this.repaint();
+        }
     },
 
     onTE(e) {
