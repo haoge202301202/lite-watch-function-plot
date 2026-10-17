@@ -248,6 +248,25 @@ function runGeom() {
   check('绘图区 ' + side, center(side), oy, side, side);
   check('摘要文字 20字符@16px', center(180), oy + side + 6, 180, 16);
   check('按钮行 3x' + bw, center(bw * 3 + gap * 2), oy + side + byOff, bw * 3 + gap * 2, bh);
+
+  // 缩放键浮在绘图区左右上角（index.js 的 zbw / zbh / zby / zXs），同样要落在圆内
+  const zbw = pick(/const zbw = (\d+);/, 42);
+  const zbh = pick(/const zbh = (\d+);/, 34);
+  const zEdge = pick(/const zby = oy \+ (\d+);/, 8);
+  const zInset = pick(/const zXs = \[ox \+ (\d+),/, 8);
+  const oxCalc = Math.floor((W - side) / 2);
+  check('缩放键 左 ' + zbw + 'x' + zbh, oxCalc + zInset, oy + zEdge, zbw, zbh);
+  check('缩放键 右 ' + zbw + 'x' + zbh, oxCalc + side - zInset - zbw, oy + zEdge, zbw, zbh);
+
+  // 缩放档位表：必须递增，且默认索引落在表内
+  const zoomsM = idxSrc.match(/const ZOOMS = \[([\d,\s]+)\];/);
+  const zoomNums = zoomsM ? zoomsM[1].split(',').map((s) => Number(s.trim())) : [];
+  const zoomBase = pick(/const ZOOM_BASE = (\d+);/, -1);
+  chk('缩放档位递增且默认索引合法',
+    zoomNums.length >= 3 &&
+    zoomNums.every((v, i) => v > 0 && (i === 0 || v > zoomNums[i - 1])) &&
+    zoomBase >= 0 && zoomBase < zoomNums.length,
+    'n=' + zoomNums.length + ' base=' + zoomBase + ' 档位=' + JSON.stringify(zoomNums));
   // 编辑页：键盘直接跑 keypad.js 的真实布局，逐个键的四个角都要在圆内
   chk('主键盘页键数 = 27（扁平数组 /5）', KEYPAD && KEYPAD.layout(KEYPAD.MAIN_KEYS, W).length / 5 === 27,
     KEYPAD && KEYPAD.layout(KEYPAD.MAIN_KEYS, W).length / 5);

@@ -12,6 +12,9 @@ const BLUE = '#1F6FEB';
 const BTN = '#1A2330';
 const MAXLEN = 30;
 const HINT = '点 + 添加函数';
+// 可视半宽档位（世界单位）：数值越大视野越广。默认 ±8（ZOOM_BASE）。
+const ZOOMS = [2, 3, 4, 6, 8, 12, 16, 24];
+const ZOOM_BASE = 4;
 const CALLS = ['sin', 'cos', 'tan', 'ln', 'lg', 'log2',
     'asin', 'acos', 'atan', 'sqrt', 'abs', 'exp'];
 
@@ -25,6 +28,8 @@ let editText = '';
 let editMsg = '';
 let editIdx = -1;
 let fnPage = false;
+// 缩放状态与其它界面状态一样放模块级变量，不写 this（受限 ViewModel）
+let zoomIdx = ZOOM_BASE;
 let startX = 0;
 let startY = 0;
 // 防抖：同一次点击会先派发 touchend、再派发 click，
@@ -173,7 +178,7 @@ export default {
             }
         }
 
-        plot.draw(ctx, s, s, store.getList(), store.getCur(), ox, oy);
+        plot.draw(ctx, s, s, store.getList(), store.getCur(), ox, oy, ZOOMS[zoomIdx]);
 
         if (it && it.pts) {
             ctx.font = '16px sans-serif';
@@ -182,10 +187,38 @@ export default {
             ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 21);
         }
 
+        hotZones = [];
+
+        // 缩放键浮在绘图区左右上角。圆屏四角本来就被裁切，这两块是天然空位：
+        // 466 屏上是 (95,74)/(371,74)，最远角距圆心约 210px，余量 22px，
+        // 既不影响底部 3 个主按钮，也不占额外行高。画在 plot.draw 之后故覆盖于坐标系之上。
+        const zbw = 42;
+        const zbh = 34;
+        const zby = oy + 8;
+        const zXs = [ox + 8, ox + s - 8 - zbw];
+        const zActs = ['zoomout', 'zoomin'];
+        const zLabels = ['-', '+'];
+        // 到档位尽头时按钮变暗，提示已不能再缩放
+        const zDead = [zoomIdx >= ZOOMS.length - 1, zoomIdx <= 0];
+        for (let z = 0; z < 2; z++) {
+            ctx.fillStyle = zDead[z] ? '#131A24' : BTN;
+            ctx.fillRect(zXs[z], zby, zbw, zbh);
+            ctx.fillStyle = zDead[z] ? '#4A5A6E' : FG;
+            ctx.font = '24px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(zLabels[z], zXs[z] + zbw / 2, zby + zbh / 2 + 9);
+            hotZones.push(zXs[z], zby, zbw, zbh, zActs[z]);
+        }
+
+        // 绘图区右下角标出当前视野半宽，缩放幅度一目了然
+        ctx.font = '14px sans-serif';
+        ctx.fillStyle = '#4A5A6E';
+        ctx.textAlign = 'right';
+        ctx.fillText('\u00b1' + ZOOMS[zoomIdx], ox + s - 6, oy + s - 6);
+
         // 底部按钮 + 热区。尺寸按圆屏安全区反推：
         // 按钮行最外下角必须落在 r=233 圆内，否则两侧会被圆边裁掉、点不到。
         // 3x72 + 2x10 = 236 宽，by=oy+s+30 时最远角约 222.8，余量 10px。
-        hotZones = [];
         const bw = 72;
         const bh = 42;
         const gap = 10;
@@ -274,6 +307,14 @@ export default {
     },
 
     act(a) {
+        if (a === 'zoomin') {
+            if (zoomIdx > 0) { zoomIdx = zoomIdx - 1; this.repaint(); }
+            return;
+        }
+        if (a === 'zoomout') {
+            if (zoomIdx < ZOOMS.length - 1) { zoomIdx = zoomIdx + 1; this.repaint(); }
+            return;
+        }
         if (a === 'prev') { store.prev(); this.repaint(); return; }
         if (a === 'next') { store.next(); this.repaint(); return; }
         if (a === 'add') {

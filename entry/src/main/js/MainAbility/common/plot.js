@@ -33,18 +33,19 @@ function syOf(y, H, v) {
     return OY + H - (y - v.ymin) * H / (v.ymax - v.ymin);
 }
 
-// 世界坐标窗口：以原点为中心，按画布长宽比扩展，保证图像不被拉伸
-function makeView(W, H) {
-    const half = 8;
-    const v = { xmin: -half, xmax: half, ymin: -half, ymax: half };
+// 世界坐标窗口：以原点为中心，按画布长宽比扩展，保证图像不被拉伸。
+// half 是可视半宽（世界单位），缩放功能通过它改变视野范围；非法值回落为默认 ±8。
+function makeView(W, H, half) {
+    const h = (typeof half === 'number' && isFinite(half) && half > 0) ? half : 8;
+    const v = { xmin: -h, xmax: h, ymin: -h, ymax: h };
     if (W > H) {
         const k = W / H;
-        v.xmin = -half * k;
-        v.xmax = half * k;
+        v.xmin = -h * k;
+        v.xmax = h * k;
     } else if (H > W) {
         const k = H / W;
-        v.ymin = -half * k;
-        v.ymax = half * k;
+        v.ymin = -h * k;
+        v.ymax = h * k;
     }
     return v;
 }
@@ -366,7 +367,7 @@ export default {
     /**
      * 全量重绘。funcs 为曲线记录数组，curIdx 指定要高亮特殊点的那一条。
      */
-    draw: function (ctx, W, H, funcs, curIdx, ox, oy) {
+    draw: function (ctx, W, H, funcs, curIdx, ox, oy, half) {
         // 尺寸必须是有限正数，否则后续所有坐标都会是 NaN，
         // canvas 会抛 TypeError: wrong type of argument
         if (typeof W !== 'number' || typeof H !== 'number' || !isFinite(W) || !isFinite(H) || W <= 0 || H <= 0) {
@@ -374,7 +375,7 @@ export default {
         }
         OX = (typeof ox === 'number' && isFinite(ox)) ? ox : 0;
         OY = (typeof oy === 'number' && isFinite(oy)) ? oy : 0;
-        const v = makeView(W, H);
+        const v = makeView(W, H, half);
         clear(ctx, W, H);
         drawGrid(ctx, W, H, v);
         drawAxes(ctx, W, H, v);
