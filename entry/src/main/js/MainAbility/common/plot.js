@@ -13,7 +13,7 @@ import expr from './expr';
 import num from './num';
 
 const BG = '#0B0F14';
-const GRID = '#1B2430';
+const GRID = '#1F2A38';
 const AXIS = '#54657C';
 const TICK_C = '#77879B';
 const VERTEX_C = '#FFD166';

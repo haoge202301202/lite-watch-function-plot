@@ -466,8 +466,15 @@ function runGeom() {
   const hy1 = hysM ? Number(hysM[1]) : 150;
   const hy2 = hysM ? Number(hysM[2]) : 262;
   const kbh = pick(/const kbh = (\d+);/, 44);
-  const kby = pick(/const kby = (\d+);/, 352);
-  check('开始界面 标题', center(128), 66, 128, 32);
+  const kby = pick(/const kby = (\d+);/, 356);
+  const homeTitleY = pick(/ctx\.fillText\('函数绘图', W \/ 2, (\d+)\);/, 96);
+  const homeSubY = pick(/ctx\.fillText\('高中数学函数图像', W \/ 2, (\d+)\);/, 124);
+  const dw = pick(/const dw = (\d+);/, 140);
+  const dy0 = pick(/const dy0 = (\d+);/, 34);
+  const dh = pick(/const dh = (\d+);/, 26);
+  check('开始界面 装饰抛物线', center(dw), dy0 - 2, dw, dh + 4);
+  check('开始界面 标题', center(128), homeTitleY - 26, 128, 32);
+  check('开始界面 副标题', center(120), homeSubY - 12, 120, 15);
   check('开始界面 按钮1(进入绘图)', center(hbw), hy1, hbw, hbh);
   check('开始界面 按钮2(设置)', center(hbw), hy2, hbw, hbh);
   check('开始界面 保留开关行', center(hbw), kby, hbw, kbh);

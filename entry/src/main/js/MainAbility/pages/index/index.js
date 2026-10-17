@@ -7,11 +7,55 @@ import focus from '../../common/focus';
 import settings from '../../common/settings';
 
 const BG = '#0B0F14';
-const FG = '#E8EEF6';
-const DIM = '#8FA3B8';
+const FG = '#EDF2F8';
+const DIM = '#94A5BB';
+// 弱化文字：原来用的 #4A5A6E 在深底上几乎看不见（右下角「±8」就是这个问题），提亮两档
+const MUTED = '#7A8CA6';
 const ERR = '#F07272';
-const BLUE = '#1F6FEB';
-const BTN = '#1A2330';
+const BLUE = '#2E7DF6';
+const BTN = '#1C2634';
+// Lite canvas 没有圆角 / 阴影 / 渐变，一整片纯色矩形在深色底上会显得很平；
+// 用顶部 1px 高光 + 底部 1px 暗边这两条像素线把层次做出来。
+const BTN_HL = '#2B3A4D';
+const BTN_SH = '#111925';
+const BLUE_HL = '#5AA0FF';
+const BLUE_SH = '#1B5FCB';
+// 绘图区描边色：比网格亮一点，用来把坐标系和页面背景分开
+const PANEL = '#223143';
+const CARD = { bg: BTN, hl: BTN_HL, sh: BTN_SH };
+const CARD_BLUE = { bg: BLUE, hl: BLUE_HL, sh: BLUE_SH };
+
+// 统一卡片：主体 + 高光 + 暗边
+function card(ctx, x, y, w, h, style) {
+    const st = style || CARD;
+    ctx.fillStyle = st.bg;
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = st.hl;
+    ctx.fillRect(x, y, w, 1);
+    ctx.fillStyle = st.sh;
+    ctx.fillRect(x, y + h - 1, w, 1);
+}
+
+// 表达式显示美化：x^2 -> x²。只在显示层转换，解析与存储仍然是原来的 ASCII 写法。
+const SUP = ['\u2070', '\u00B9', '\u00B2', '\u00B3', '\u2074',
+    '\u2075', '\u2076', '\u2077', '\u2078', '\u2079'];
+function prettyExpr(s) {
+    if (!s) { return s; }
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+        const c = s.charAt(i);
+        if (c === '^' && i + 1 < s.length) {
+            const d = s.charAt(i + 1);
+            if (d >= '0' && d <= '9') {
+                out += SUP[parseInt(d, 10)];
+                i++;
+                continue;
+            }
+        }
+        out += c;
+    }
+    return out;
+}
 const MAXLEN = 30;
 const HINT = '点 + 添加函数';
 // 可视半宽档位（世界单位）：数值越大视野越广。默认 ±8（ZOOM_BASE）。
@@ -221,7 +265,7 @@ export default {
         let head = HINT;
         if (it) {
             head = (single >= 0)
-                ? (clip(it.text, 13) + '  ' + (single + 1) + '/' + total)
+                ? (clip(prettyExpr(it.text), 13) + '  ' + (single + 1) + '/' + total)
                 : ('全部 ' + total + ' 条');
         }
         // 基线 44（不是 30）：圆屏顶部收窄，20px 字形的上部若从 y=14 起会越出圆边，
@@ -254,6 +298,14 @@ export default {
             (single >= 0) ? 0 : ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, single < 0,
             settings.snapshot());
 
+        // 绘图区描边：把坐标系和页面背景分开。
+        // 必须画在 plot.draw 之后 —— 它内部的 clear() 按 OX/OY 铺了整块底色，会盖掉先画的东西。
+        ctx.fillStyle = PANEL;
+        ctx.fillRect(ox, oy, s, 1);
+        ctx.fillRect(ox, oy + s - 1, s, 1);
+        ctx.fillRect(ox, oy, 1, s);
+        ctx.fillRect(ox + s - 1, oy, 1, s);
+
         // 底部摘要：
         //   单条模式 —— 显示当前那条的完整特殊点（最值 / 交点 / 截距）；
         //   全部模式 —— 按「序号:(顶点x,顶点y)」把每条依次列出，非二次函数留「-」占位，
@@ -284,8 +336,7 @@ export default {
         const zbh = 34;
         const zby = oy + 8;
 
-        ctx.fillStyle = BTN;
-        ctx.fillRect(ox + 8, zby, zbw, zbh);
+        card(ctx, ox + 8, zby, zbw, zbh, CARD);
         ctx.fillStyle = FG;
         ctx.font = '20px sans-serif';
         ctx.textAlign = 'center';
@@ -298,9 +349,14 @@ export default {
         // 到档位尽头时按钮变暗，提示已不能再缩放
         const zDead = [zoomIdx >= ZOOMS.length - 1, zoomIdx <= 0];
         for (let z = 0; z < 2; z++) {
-            ctx.fillStyle = zDead[z] ? '#131A24' : BTN;
-            ctx.fillRect(zXs[z], zby, zbw, zbh);
-            ctx.fillStyle = zDead[z] ? '#4A5A6E' : FG;
+            if (zDead[z]) {
+                // 到档位尽头的键只画一个压暗的底，不再加高光，视觉上就是"按不动"
+                ctx.fillStyle = '#151D28';
+                ctx.fillRect(zXs[z], zby, zbw, zbh);
+            } else {
+                card(ctx, zXs[z], zby, zbw, zbh, CARD);
+            }
+            ctx.fillStyle = zDead[z] ? MUTED : FG;
             ctx.font = '24px sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText(zLabels[z], zXs[z] + zbw / 2, zby + zbh / 2 + FONT_MID);
@@ -310,7 +366,7 @@ export default {
         // 绘图区右下角标出当前视野半宽；已平移时换高亮色并加"已移"，提示视图偏离了原点
         const panned = (viewCx !== 0 || viewCy !== 0);
         ctx.font = '14px sans-serif';
-        ctx.fillStyle = panned ? '#4E90C4' : '#4A5A6E';
+        ctx.fillStyle = panned ? '#6BA6E8' : MUTED;
         ctx.textAlign = 'right';
         ctx.fillText(panned ? ('\u00b1' + ZOOMS[zoomIdx] + ' \u5df2\u79fb') : ('\u00b1' + ZOOMS[zoomIdx]),
             ox + s - 6, oy + s - 6);
@@ -327,8 +383,7 @@ export default {
         const acts = ['prev', 'add', 'next'];
         for (let i = 0; i < 3; i++) {
             const x = bx + i * (bw + gap);
-            ctx.fillStyle = (acts[i] === 'add') ? BLUE : BTN;
-            ctx.fillRect(x, by, bw, bh);
+            card(ctx, x, by, bw, bh, (acts[i] === 'add') ? CARD_BLUE : CARD);
             ctx.fillStyle = FG;
             ctx.font = '24px sans-serif';
             ctx.textAlign = 'center';
@@ -345,22 +400,39 @@ export default {
     drawHome(ctx, W) {
         hotZones = [];
 
+        // 顶部装饰：一条开口向上的抛物线，点题又不抢标题
+        const dw = 140;
+        const dh = 26;
+        const dx0 = (W - dw) / 2;
+        const dy0 = 34;
+        ctx.strokeStyle = BLUE;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i <= dw; i++) {
+            const t = (i / dw) * 2 - 1;
+            const yy = dy0 + dh * t * t;
+            if (i === 0) { ctx.moveTo(dx0 + i, yy); } else { ctx.lineTo(dx0 + i, yy); }
+        }
+        ctx.stroke();
+
         ctx.textAlign = 'center';
         ctx.fillStyle = FG;
         ctx.font = '32px sans-serif';
-        ctx.fillText('函数绘图', W / 2, 92);
+        ctx.fillText('函数绘图', W / 2, 96);
+        // 副标题：一句话说清这是什么，顺便把标题区和按钮区隔开
+        ctx.fillStyle = MUTED;
+        ctx.font = '15px sans-serif';
+        ctx.fillText('高中数学函数图像', W / 2, 124);
 
         // 变量名带 h 前缀，与 drawPlot 的 bw/bh 区分开（自测按名字正则提取几何参数）
         const hbw = 280;
         const hbh = 88;
         const hbx = (W - hbw) / 2;
-        const hys = [136, 244];
+        const hys = [146, 254];
         const labels = ['进入绘图', '设置'];
         const acts = ['gotoPlot', 'gotoSettings'];
-        const bgs = [BLUE, BTN];
         for (let i = 0; i < 2; i++) {
-            ctx.fillStyle = bgs[i];
-            ctx.fillRect(hbx, hys[i], hbw, hbh);
+            card(ctx, hbx, hys[i], hbw, hbh, (i === 0) ? CARD_BLUE : CARD);
             ctx.fillStyle = FG;
             ctx.font = '28px sans-serif';
             ctx.textAlign = 'center';
@@ -371,17 +443,16 @@ export default {
         // 「进入绘图时」开关：左标签 + 右取值，整行可点，点一下换下一个值。
         // 它和设置页里的「保留上次函数」是同一项（都读 settings），两边改哪边都一样。
         const kbh = 44;
-        const kby = 352;
-        ctx.fillStyle = BTN;
-        ctx.fillRect(hbx, kby, hbw, kbh);
+        const kby = 356;
+        card(ctx, hbx, kby, hbw, kbh, CARD);
         const keepIdx = settings.count() - 1;
         ctx.fillStyle = DIM;
-        ctx.font = '18px sans-serif';
+        ctx.font = '19px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText('进入绘图时', hbx + 16, kby + kbh / 2 + vMid(18));
+        ctx.fillText('进入绘图时', hbx + 16, kby + kbh / 2 + vMid(19));
         ctx.fillStyle = FG;
         ctx.textAlign = 'right';
-        ctx.fillText(settings.textOf(keepIdx), hbx + hbw - 16, kby + kbh / 2 + vMid(18));
+        ctx.fillText(settings.textOf(keepIdx), hbx + hbw - 16, kby + kbh / 2 + vMid(19));
         hotZones.push(hbx, kby, hbw, kbh, 'set' + keepIdx);
     },
 
@@ -401,8 +472,7 @@ export default {
         const n = settings.count();
         for (let i = 0; i < n; i++) {
             const y = sry0 + i * srh;
-            ctx.fillStyle = BTN;
-            ctx.fillRect(srx, y + 3, srw, srh - 6);
+            card(ctx, srx, y + 3, srw, srh - 6, CARD);
 
             ctx.fillStyle = FG;
             ctx.font = '20px sans-serif';
@@ -420,8 +490,7 @@ export default {
         const obh = 46;
         const obx = (W - obw) / 2;
         const oby = sry0 + n * srh + 12;
-        ctx.fillStyle = BTN;
-        ctx.fillRect(obx, oby, obw, obh);
+        card(ctx, obx, oby, obw, obh, CARD);
         ctx.fillStyle = FG;
         ctx.font = '22px sans-serif';
         ctx.textAlign = 'center';
