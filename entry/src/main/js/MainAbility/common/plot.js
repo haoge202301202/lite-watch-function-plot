@@ -265,8 +265,13 @@ function putLabel(ctx, text, px, py, color, W, H, placed, orders) {
  * 所以：点按优先级绘制，让顶点压在最上层；文字先比间距再比包围盒，
  * 距离过近或位置冲突就不再重复书写，避免出现「最(0(0)0)」这种重叠。
  */
-function drawQuadPoints(ctx, quad, W, H, v) {
-    const placed = [];
+function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly) {
+    // placed 由调用方传入时可在多条函数之间共享，实现跨曲线的标注避让
+    if (!placed) { placed = []; }
+    // pal 允许换成曲线自身的颜色；不传则用统一的顶点/交点配色
+    const cV = (pal && pal.vertex) ? pal.vertex : VERTEX_C;
+    const cR = (pal && pal.root) ? pal.root : ROOT_C;
+    const cY = (pal && pal.yint) ? pal.yint : YINT_C;
     // 只有点几乎完全重合（< 6px）时才放弃重复标注；稍远一些就交给 putLabel
     // 的方位尝试去避让，避免把「数值不同但位置接近」的坐标误丢。
     const MIN_SEP = 6;
@@ -284,33 +289,34 @@ function drawQuadPoints(ctx, quad, W, H, v) {
     // 点：先画低优先级，顶点最后画，重合时顶点在上面
     const cy = quad.yIntercept;
     let ypx = 0, ypy = 0, showY = false;
-    if (inView(0, cy) && Math.abs(cy) > 1e-9) {
+    if (!vertexOnly && inView(0, cy) && Math.abs(cy) > 1e-9) {
         ypx = sxOf(0, W, v);
         ypy = syOf(cy, H, v);
         showY = true;
-        markPoint(ctx, ypx, ypy, YINT_C, 3);
+        markPoint(ctx, ypx, ypy, cY, 3);
     }
 
     const rn = quad.roots.length;
     const rp = [];
     for (let i = 0; i < rn; i++) {
+        if (vertexOnly) { rp.push(null); continue; }
         const rx = quad.roots[i];
         if (!inView(rx, 0)) { rp.push(null); continue; }
         const px = sxOf(rx, W, v);
         const py = syOf(0, H, v);
         rp.push([px, py]);
-        markPoint(ctx, px, py, ROOT_C, 3);
+        markPoint(ctx, px, py, cR, 3);
     }
 
     if (showVertex) {
-        markPoint(ctx, vpx, vpy, VERTEX_C, 4);
+        markPoint(ctx, vpx, vpy, cV, 4);
     }
 
     // 文字：顶点优先，其后交点和截距
     if (showVertex) {
         const tag = (quad.isMin ? '最小' : '最大') +
             '(' + num.fmt2(vx) + ',' + num.fmt2(vy) + ')';
-        putLabel(ctx, tag, vpx, vpy, VERTEX_C, W, H, placed,
+        putLabel(ctx, tag, vpx, vpy, cV, W, H, placed,
             quad.isMin ? ['below', 'above', 'right', 'left'] : ['above', 'below', 'right', 'left']);
     }
 
@@ -321,7 +327,7 @@ function drawQuadPoints(ctx, quad, W, H, v) {
         if (showVertex && Math.abs(r[0] - vpx) < MIN_SEP && Math.abs(r[1] - vpy) < MIN_SEP) {
             continue;
         }
-        putLabel(ctx, '(' + num.fmt2(quad.roots[i]) + ',0)', r[0], r[1], ROOT_C, W, H, placed,
+        putLabel(ctx, '(' + num.fmt2(quad.roots[i]) + ',0)', r[0], r[1], cR, W, H, placed,
             ['below', 'above', 'right', 'left']);
     }
 
@@ -337,7 +343,7 @@ function drawQuadPoints(ctx, quad, W, H, v) {
             }
         }
         if (!skip) {
-            putLabel(ctx, '(0,' + num.fmt2(cy) + ')', ypx, ypy, YINT_C, W, H, placed,
+            putLabel(ctx, '(0,' + num.fmt2(cy) + ')', ypx, ypy, cY, W, H, placed,
                 ['left', 'right', 'above']);
         }
     }
@@ -360,14 +366,33 @@ function describeQuad(q) {
     return s;
 }
 
+/**
+ * 全部模式的底部汇总：把每条二次函数的顶点坐标按「序号:(x,y)」紧凑列出。
+ * 非二次函数留「-」占位，保证序号与曲线一一对应。
+ */
+function describeAll(list) {
+    let s = '';
+    for (let i = 0; i < list.length; i++) {
+        const f = list[i];
+        if (!f) { continue; }
+        if (f.quad) {
+            s += (i + 1) + ':(' + num.fmt2(f.quad.vertex.x) + ',' + num.fmt2(f.quad.vertex.y) + ')  ';
+        } else {
+            s += (i + 1) + ':-  ';
+        }
+    }
+    return s;
+}
+
 export default {
     makeView: makeView,
     describeQuad: describeQuad,
+    describeAll: describeAll,
 
     /**
      * 全量重绘。funcs 为曲线记录数组，curIdx 指定要高亮特殊点的那一条。
      */
-    draw: function (ctx, W, H, funcs, curIdx, ox, oy, half, cx, cy) {
+    draw: function (ctx, W, H, funcs, curIdx, ox, oy, half, cx, cy, markAll) {
         // 尺寸必须是有限正数，否则后续所有坐标都会是 NaN，
         // canvas 会抛 TypeError: wrong type of argument
         if (typeof W !== 'number' || typeof H !== 'number' || !isFinite(W) || !isFinite(H) || W <= 0 || H <= 0) {
@@ -386,10 +411,22 @@ export default {
                 drawCurve(ctx, f.ast, f.color, W, H, v);
             }
         }
-        if (curIdx >= 0 && curIdx < funcs.length) {
+        // 标注共用一个 placed 表，多条函数之间也会互相避让
+        const placed = [];
+        if (markAll) {
+            // 全部同屏：每条二次函数都标出顶点（用各自曲线的颜色），
+            // 只标顶点不标交点 —— 多条曲线叠在一起时交点标注必然糊成一片。
+            for (let i = 0; i < funcs.length; i++) {
+                const af = funcs[i];
+                if (af && af.quad) {
+                    drawQuadPoints(ctx, af.quad, W, H, v, placed,
+                        { vertex: af.color, root: ROOT_C, yint: YINT_C }, true);
+                }
+            }
+        } else if (curIdx >= 0 && curIdx < funcs.length) {
             const cf = funcs[curIdx];
             if (cf && cf.quad) {
-                drawQuadPoints(ctx, cf.quad, W, H, v);
+                drawQuadPoints(ctx, cf.quad, W, H, v, placed, null, false);
             }
         }
     }

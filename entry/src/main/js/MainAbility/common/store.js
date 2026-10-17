@@ -27,6 +27,9 @@ function makeItem(src, colorIdx) {
         ast: r.ast,
         color: COLORS[colorIdx % COLORS.length],
         quad: null,
+        // 是否已做过二次函数分析。非二次函数的 quad 恒为 null，
+        // 没有这个标记就会在每次重绘时重复做一遍多项式提取。
+        quadDone: false,
         pts: ''
     };
 }

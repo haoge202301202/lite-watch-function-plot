@@ -209,27 +209,44 @@ export default {
         ctx.textAlign = 'center';
         ctx.fillText(head, W / 2, 42);
 
-        // 二次函数特殊点：惰性计算（store 不依赖 poly）
-        if (it && !it.quad) {
-            try {
-                const q = poly.quadInfo(poly.polyOf(it.ast));
-                if (q) {
-                    it.quad = q;
-                    it.pts = plot.describeQuad(q);
+        // 二次函数特殊点：惰性计算（store 不依赖 poly）。
+        // 全部模式下每条都要标注，所以这里遍历所有条；quadDone 保证只算一次。
+        for (let qi = 0; qi < list.length; qi++) {
+            const qf = list[qi];
+            if (qf && qf.ast && !qf.quadDone) {
+                qf.quadDone = true;
+                try {
+                    const q = poly.quadInfo(poly.polyOf(qf.ast));
+                    if (q) {
+                        qf.quad = q;
+                        qf.pts = plot.describeQuad(q);
+                    }
+                } catch (e2) {
+                    qf.quad = null;
                 }
-            } catch (e2) {
-                it.quad = null;
             }
         }
 
+        // 最后一个参数 markAll：全部模式下每条二次函数都标顶点，单条模式只标当前这条
         plot.draw(ctx, s, s, (single >= 0) ? [list[single]] : list,
-            (single >= 0) ? 0 : ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy);
+            (single >= 0) ? 0 : ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, single < 0);
 
-        if (it && it.pts) {
-            ctx.font = '16px sans-serif';
+        // 底部摘要：
+        //   单条模式 —— 显示当前那条的完整特殊点（最值 / 交点 / 截距）；
+        //   全部模式 —— 按「序号:(顶点x,顶点y)」把每条依次列出，非二次函数留「-」占位，
+        //              这样即使同屏多条也能逐个核对坐标。
+        if (single >= 0) {
+            if (it && it.pts) {
+                ctx.font = '16px sans-serif';
+                ctx.fillStyle = DIM;
+                ctx.textAlign = 'center';
+                ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 18);
+            }
+        } else if (total > 0) {
+            ctx.font = '14px sans-serif';
             ctx.fillStyle = DIM;
             ctx.textAlign = 'center';
-            ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 18);
+            ctx.fillText(clip(plot.describeAll(list), 32), W / 2, oy + s + 18);
         }
 
         hotZones = [];

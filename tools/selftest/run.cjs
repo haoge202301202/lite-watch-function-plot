@@ -183,6 +183,38 @@ async function runLogic() {
   plot.draw(mExtMax.ctx, 288, 288, funcs, 0, 89, 66, 48, 0, 0);
   chk('±48 档绘制无 NaN', mExtMax.bad.length === 0, mExtMax.bad.slice(0, 4).join(','));
 
+  // 全部同屏：每条二次函数都要标出顶点，非二次留占位
+  const COLORS3 = ['#4FC3F7', '#FFB74D', '#7BD389'];
+  const multi = ['x^2-3x+2', '-x^2+4', '2x+1'].map((s, i) => {
+    const r = expr.parse(s);
+    const it = { src: r.body, ast: r.ast, color: COLORS3[i], quad: null, pts: '' };
+    const qq = poly.quadInfo(poly.polyOf(r.ast));
+    if (qq) { it.quad = qq; it.pts = plot.describeQuad(qq); }
+    return it;
+  });
+  chk('构造 3 条（前 2 条是二次函数）',
+    multi.length === 3 && !!multi[0].quad && !!multi[1].quad && !multi[2].quad);
+
+  const dAll = plot.describeAll(multi);
+  chk('describeAll 序号:顶点 格式', dAll.indexOf('1:(1.5,-0.25)') === 0, dAll);
+  chk('describeAll 非二次留占位', dAll.indexOf('3:-') >= 0, dAll);
+
+  const mMark = makeCtx();
+  let threwMark = null;
+  try { plot.draw(mMark.ctx, 304, 304, multi, 0, 81, 66, 8, 0, 0, true); } catch (e) { threwMark = e.message; }
+  chk('全部模式绘制不抛异常且无 NaN', threwMark === null && mMark.bad.length === 0,
+    threwMark || mMark.bad.slice(0, 4).join(','));
+  const markTexts = mMark.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
+  const vLabels = markTexts.filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0);
+  chk('全部模式标出 2 个顶点坐标', vLabels.length === 2, JSON.stringify(vLabels));
+
+  // 单条模式（markAll=false）只标当前那条
+  const mOne = makeCtx();
+  plot.draw(mOne.ctx, 304, 304, multi, 1, 81, 66, 8, 0, 0, false);
+  const oneLabels = mOne.ops.filter((o) => o[0] === 'fillText').map((o) => o[1])
+    .filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0);
+  chk('单条模式只标 1 个顶点', oneLabels.length === 1, JSON.stringify(oneLabels));
+
   console.log('  逻辑断言通过 ' + pass + ' 项（失败 ' + fail + ' 项）');
   fs.rmSync(tmp, { recursive: true, force: true });
 }
