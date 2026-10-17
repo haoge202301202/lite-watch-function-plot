@@ -365,7 +365,7 @@ export default {
     /**
      * 解析用户输入，返回 {ok:true, ast, body} 或 {ok:false, msg}
      */
-    parse: function (src) {
+    parse: function (src, needFn) {
         if (src === null || src === undefined || src === '') {
             return { ok: false, msg: '请先输入表达式' };
         }
@@ -384,7 +384,13 @@ export default {
         if (ast === null) {
             return { ok: false, msg: '表达式格式有误' };
         }
-        return { ok: true, ast: ast, body: body, fn: compile(ast) };
+        // 只有真要画图的路径才编译闭包树。编辑页每按一个键都会走 check()，
+        // 若每次都编译，输入十来个字符就会造出上百个短命闭包 —— 64KB 堆根本扛不住，
+        // 表现就是"输入函数时崩溃"。
+        if (needFn === true) {
+            return { ok: true, ast: ast, body: body, fn: compile(ast) };
+        }
+        return { ok: true, ast: ast, body: body };
     },
     calc: evalNode,
     compile: compile

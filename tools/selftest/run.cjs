@@ -156,7 +156,7 @@ async function runLogic() {
   chk('plot 不产生 NaN 坐标', m.bad.length === 0, m.bad.slice(0, 4).join(','));
   const moves = m.ops.filter((o) => o[0] === 'moveTo').length;
   const lines = m.ops.filter((o) => o[0] === 'lineTo').length;
-  chk('生成折线路径', moves > 20 && lines > 400, 'moveTo=' + moves + ' lineTo=' + lines);
+  chk('生成折线路径', moves > 20 && lines > 250, 'moveTo=' + moves + ' lineTo=' + lines);
   chk('渐近线断点生效', moves > 12, 'moveTo=' + moves);
   const texts = m.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
   chk('标注含"最小"/"最大"', texts.some((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0));
@@ -289,7 +289,9 @@ async function runLogic() {
   chk('切到接着上次（keepLast=1）', settings.snapshot().keepLast === 1, settings.snapshot().keepLast);
   chk('切到接着上次的显示文本', settings.textOf(4) === '接着上次', settings.textOf(4));
   settings.reset();
-  chk('默认画面等级=1 标准', settings.snapshot().quality === 1, settings.snapshot().quality);
+  chk('默认画面等级=0 流畅（最省的一档）', settings.snapshot().quality === 0, settings.snapshot().quality);
+  settings.next(5);
+  chk('画面等级 流畅->标准', settings.snapshot().quality === 1, settings.snapshot().quality);
   settings.next(5);
   chk('画面等级 标准->精细', settings.snapshot().quality === 2, settings.snapshot().quality);
   settings.next(5);

@@ -11,7 +11,9 @@ import expr from './expr';
 const KEY_LIST = 'hanshu_exprs_v1';
 const KEY_CUR = 'hanshu_cur_v1';
 const COLORS = ['#4FC3F7', '#FFB74D', '#7BD389', '#F06292', '#BA68C8'];
-const MAXF = 5;
+// 同时绘制的曲线上限。每条曲线常驻一棵求值闭包树 + 二次函数分析结果 + 若干字符串，
+// 是把 JS 堆吃满的主要来源；3 条足够做函数对比，又留出足够余量给运行时。
+const MAXF = 3;
 
 let list = [];
 let cur = 0;
@@ -19,7 +21,8 @@ let loaded = false;
 
 // 由表达式文本构造一条曲线记录；非法返回 null
 function makeItem(src, colorIdx) {
-    const r = expr.parse(src);
+    // 只有真正入库的曲线才需要编译后的求值闭包
+    const r = expr.parse(src, true);
     if (!r.ok) { return null; }
     return {
         src: r.body,

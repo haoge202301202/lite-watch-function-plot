@@ -25,13 +25,13 @@ const PANEL = '#223143';
 const CARD = { bg: BTN, hl: BTN_HL, sh: BTN_SH };
 const CARD_BLUE = { bg: BLUE, hl: BLUE_HL, sh: BLUE_SH };
 
-// 统一卡片：主体 + 高光 + 暗边
+// 统一卡片：主体 + 底部 1px 暗边。
+// 原本还有一条顶部高光线，为了压绘制量去掉了 —— 每张卡片少一次 fillRect，
+// 保留暗边已经够做出"浮起"的层次。
 function card(ctx, x, y, w, h, style) {
     const st = style || CARD;
     ctx.fillStyle = st.bg;
     ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = st.hl;
-    ctx.fillRect(x, y, w, 1);
     ctx.fillStyle = st.sh;
     ctx.fillRect(x, y + h - 1, w, 1);
 }
@@ -444,29 +444,16 @@ export default {
     drawHome(ctx, W) {
         hotZones.length = 0;
 
-        // 顶部装饰：一条开口向上的抛物线，点题又不抢标题
-        const dw = 140;
-        const dh = 26;
-        const dx0 = (W - dw) / 2;
-        const dy0 = 34;
-        ctx.strokeStyle = BLUE;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        for (let i = 0; i <= dw; i++) {
-            const t = (i / dw) * 2 - 1;
-            const yy = dy0 + dh * t * t;
-            if (i === 0) { ctx.moveTo(dx0 + i, yy); } else { ctx.lineTo(dx0 + i, yy); }
-        }
-        ctx.stroke();
-
+        // 装饰抛物线已移除：画它要 140 次 lineTo + 一次 stroke，
+        // 只为一个纯装饰效果不值得，真机上每次重绘都在为它买单。
         ctx.textAlign = 'center';
         ctx.fillStyle = FG;
         ctx.font = '32px HarmonyOS Sans';
-        ctx.fillText('函数绘图', W / 2, 96);
+        ctx.fillText('函数绘图', W / 2, 84);
         // 副标题：一句话说清这是什么，顺便把标题区和按钮区隔开
         ctx.fillStyle = MUTED;
         ctx.font = '15px HarmonyOS Sans';
-        ctx.fillText('高中数学函数图像', W / 2, 124);
+        ctx.fillText('高中数学函数图像', W / 2, 112);
 
         // 变量名带 h 前缀，与 drawPlot 的 bw/bh 区分开（自测按名字正则提取几何参数）
         const hbw = 280;

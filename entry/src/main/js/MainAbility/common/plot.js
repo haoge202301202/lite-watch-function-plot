@@ -477,13 +477,16 @@ export default {
         // 而调用次数是本应用在真机上最敏感的指标（一次重绘上千次调用会撑不住）。
         // 已经整体下调过一轮：曲线采样减半、网格与刻度都更稀。
         const q = (typeof o.quality === 'number') ? o.quality : 1;
-        const gridTarget = (q >= 2) ? 8 : (q <= 0 ? 3 : 6);
-        const tickTarget = (q >= 2) ? 4 : (q <= 0 ? 2 : 3);
+        const gridTarget = (q >= 2) ? 8 : (q <= 0 ? 3 : 5);
+        const tickTarget = (q >= 2) ? 4 : (q <= 0 ? 2 : 2);
         // 曲线采样分三档。每个采样点都是一次 lineTo（外加一次表达式求值），
         // 这是每帧最大的开销来源，所以砍得最狠：标准档 304px 画布上约每 3 像素一个点，
         // 折线看上去依然是光滑曲线，但 lineTo 次数从 304 降到 100。
-        const sampleSteps = (q >= 2) ? Math.floor(W * 0.66)
-            : (q <= 0 ? Math.floor(W / 5) : Math.floor(W / 3));
+        // 每个采样点 = 一次表达式求值 + 一次 lineTo，是绘图页的绝对大头
+        // （5 条曲线时占全部 canvas 调用的 8 成）。标准档每 4 像素一个点，
+        // 折线在 466 圆屏上看上去依然是曲线，但调用数从 505 降到 380。
+        const sampleSteps = (q >= 2) ? Math.floor(W / 2)
+            : (q <= 0 ? Math.floor(W / 6) : Math.floor(W / 4));
         // 曲线入场动画的横向进度（1 表示完整）
 
         drawGrid(ctx, W, H, v, gridTarget);

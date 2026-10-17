@@ -70,10 +70,16 @@ function keyFg(label) {
     return F_OP;
 }
 
+// 字体串直接预定义：27 个键每个都要设置一次 ctx.font，
+// 若每次都拼接字符串，一次键盘重绘就会造出 27 个短命字符串。
+const FONT_S = '15px HarmonyOS Sans';
+const FONT_M = '21px HarmonyOS Sans';
+const FONT_L = '26px HarmonyOS Sans';
+
 function keyFont(s) {
-    if (s.length >= 4) { return 15; }
-    if (s.length >= 2) { return 21; }
-    return 26;
+    if (s.length >= 4) { return FONT_S; }
+    if (s.length >= 2) { return FONT_M; }
+    return FONT_L;
 }
 
 /**
@@ -109,11 +115,11 @@ function draw(ctx, W, H, flat) {
         const label = flat[i + 4];
         ctx.fillStyle = keyBg(label);
         ctx.fillRect(x, y, w, h);
-        const fs = keyFont(label);
-        ctx.font = fs + 'px HarmonyOS Sans';
+        const fnt = keyFont(label);
+        ctx.font = fnt;
         ctx.fillStyle = keyFg(label);
         ctx.textAlign = 'center';
-        ctx.fillText(label, x + w / 2, y + h / 2 - fs * 0.35);
+        ctx.fillText(label, x + w / 2, y + h / 2 - fnt.charAt(0) * 3.5);
     }
 }
 
