@@ -16,7 +16,10 @@ const ITEMS = [
     { id: 'width', label: '曲线粗细', values: [2, 3, 4], def: 1, texts: ['细', '中', '粗'], unit: 'px' },
     { id: 'showRoots', label: '显示交点', values: [1, 0], def: 0, texts: ['显示', '隐藏'], unit: '' },
     { id: 'dotSize', label: '点标记大小', values: [2, 3, 5], def: 1, texts: ['小', '中', '大'], unit: '' },
-    { id: 'showAxis', label: '对称轴', values: [1, 0], def: 0, texts: ['显示', '隐藏'], unit: '' },
+    // 对称轴默认**关闭**：它是用虚线拼出来的，一条轴要发 88 次 canvas 调用
+    //（304px 竖线按 6px 段 + 5px 间隔拆成 28 段），是绘图页最贵的一项。
+    // 真机上"画好曲线再平移/缩放/返回"全程崩溃，主要就是它把每次重绘推过了阈值。
+    { id: 'showAxis', label: '对称轴', values: [0, 1], def: 0, texts: ['隐藏', '显示'], unit: '' },
     // 每次进入绘图是否清空上次的函数。默认 0（每次重来），与 v1.9.0 的行为一致。
     { id: 'keepLast', label: '保留上次函数', values: [0, 1], def: 0, texts: ['每次重来', '接着上次'], unit: '' },
     // 动画级别：0 关闭（省电、最跟手）/ 1 简洁（按键反馈）/ 2 完整（再加曲线绘制动画）

@@ -3,7 +3,13 @@
  *
  * 只有能整理成 y = ax^2 + bx + c（a != 0）的表达式才给出顶点与交点，
  * 其余函数按需求不做特殊点处理。
+ *
+ * 这里顺带把 canvas 上要写的标注文字也拼好（labelVertex / labelRoots / labelYint）：
+ * 这些坐标是固定的，而重绘一次要写好几条标注 —— 每帧重新格式化数字会不断产生
+ * 短命字符串，在 64KB 级别的堆上是实打实的压力。
  */
+import num from './num';
+
 const MAXDEG = 6;
 
 // 返回实际次数（忽略高位 0）
@@ -129,6 +135,12 @@ function quadInfo(p) {
         roots.push(vx);
     }
 
+    // 标注文字一次性拼好（坐标固定，重绘时直接取）
+    const labelRoots = [];
+    for (let i = 0; i < roots.length; i++) {
+        labelRoots.push('(' + num.fmt2(roots[i]) + ',0)');
+    }
+
     return {
         a: a,
         b: b,
@@ -137,7 +149,11 @@ function quadInfo(p) {
         isMin: a > 0,
         roots: roots,
         yIntercept: c,
-        disc: disc
+        disc: disc,
+        labelVertex: (a > 0 ? '\u6700\u5c0f' : '\u6700\u5927') +
+            '(' + num.fmt2(vx) + ',' + num.fmt2(vy) + ')',
+        labelRoots: labelRoots,
+        labelYint: Math.abs(c) > 1e-9 ? ('(0,' + num.fmt2(c) + ')') : ''
     };
 }
 

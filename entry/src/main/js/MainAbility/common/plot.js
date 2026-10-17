@@ -28,6 +28,8 @@ let OX = 0;
 let OY = 0;
 // draw() 的视图窗口缓冲区，模块级复用
 const VIEW_BUF = { xmin: -8, xmax: 8, ymin: -8, ymax: 8 };
+// draw() 的标注占位表，模块级复用
+const PLACED_BUF = [];
 
 function sxOf(x, W, v) {
     return OX + (x - v.xmin) * W / (v.xmax - v.xmin);
@@ -138,7 +140,7 @@ function drawTicks(ctx, W, H, v, target) {
     const px0 = sxOf(0, W, v);
     const py0 = syOf(0, H, v);
     ctx.fillStyle = TICK_C;
-    ctx.font = '15px HarmonyOS Sans';
+    ctx.font = LABEL_FONT;
 
     ctx.textAlign = 'center';
     let guard = 0;
@@ -250,6 +252,16 @@ function markPoint(ctx, px, py, color, r) {
     ctx.fillRect(px - r, py - r, r * 2 + 1, r * 2 + 1);
 }
 
+// 标签包围盒对象池。每次重绘都要为每个标注建一个 7 字段对象，
+// 反复操作后这些短命对象会把 64KB 级别的堆推高（真机上表现为"多操作几次就崩"）。
+// 这里改成模块级复用：每帧开始时 boxTop 归零，从头复用同一批对象。
+const BOX_POOL = [];
+let boxTop = 0;
+
+function resetBoxPool() {
+    boxTop = 0;
+}
+
 // 标签包围盒（绝对坐标，已含 OX/OY 偏移）；超出绘图区则返回 null
 function labelBox(place, px, py, w, h, W, H) {
     const left = OX + 2;
@@ -267,7 +279,22 @@ function labelBox(place, px, py, w, h, W, H) {
         x0 = px - w / 2; y0 = py - 8 - h; tx = px; ty = py - 8; align = 'center';
     }
     if (x0 < left || x0 + w > right || y0 < top || y0 + h > bottom) { return null; }
-    return { x: x0, y: y0, w: w, h: h, tx: tx, ty: ty, align: align };
+    let box;
+    if (boxTop < BOX_POOL.length) {
+        box = BOX_POOL[boxTop];
+    } else {
+        box = { x: 0, y: 0, w: 0, h: 0, tx: 0, ty: 0, align: '' };
+        BOX_POOL.push(box);
+    }
+    boxTop++;
+    box.x = x0;
+    box.y = y0;
+    box.w = w;
+    box.h = h;
+    box.tx = tx;
+    box.ty = ty;
+    box.align = align;
+    return box;
 }
 
 function overlapsAny(box, placed) {
@@ -285,16 +312,18 @@ function overlapsAny(box, placed) {
  * 依次尝试候选方位放置标签，避开已占用区域；都放不下就放弃（只留点不写字）。
  * 这是解决「顶点 / x 交点 / y 截距落在同一点」时文字互相覆盖的关键。
  */
+const LABEL_FS = 15;
+const LABEL_FONT = '15px HarmonyOS Sans';
+
 function putLabel(ctx, text, px, py, color, W, H, placed, orders) {
-    const fs = 15;
-    const w = textWidth(text, fs);
-    const h = fs + 4;
+    const w = textWidth(text, LABEL_FS);
+    const h = LABEL_FS + 4;
+    ctx.font = LABEL_FONT;      // 提成常量：一个标注原本要拼一次字符串
     for (let i = 0; i < orders.length; i++) {
         const box = labelBox(orders[i], px, py, w, h, W, H);
         if (!box) { continue; }
         if (overlapsAny(box, placed)) { continue; }
         placed.push(box);
-        ctx.font = fs + 'px HarmonyOS Sans';
         ctx.fillStyle = color;
         ctx.textAlign = box.align;
         ctx.fillText(text, box.tx, box.ty);
@@ -339,7 +368,9 @@ function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly, set) {
         ctx.strokeStyle = SYM_C;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        dashedSegments(ctx, ax, OY, ax, OY + H, 6, 5);
+        // 段长从 6px 加大到 16px：304px 的竖线从 28 段降到 11 段，
+        // 单条对称轴的调用数从约 58 次降到约 24 次。仍然是虚线，远看几乎无差别。
+        dashedSegments(ctx, ax, OY, ax, OY + H, 16, 12);
         ctx.stroke();
     }
 
@@ -375,8 +406,10 @@ function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly, set) {
 
     // 文字：顶点优先，其后交点和截距
     if (showVertex) {
-        const tag = (quad.isMin ? '最小' : '最大') +
-            '(' + num.fmt2(vx) + ',' + num.fmt2(vy) + ')';
+        // 顶点标签在分析阶段就拼好存进 quad，重绘时直接取，不再格式化数字
+        const tag = quad.labelVertex ||
+            ((quad.isMin ? '最小' : '最大') +
+                '(' + num.fmt2(vx) + ',' + num.fmt2(vy) + ')');
         putLabel(ctx, tag, vpx, vpy, cV, W, H, placed,
             quad.isMin ? ['below', 'above', 'right', 'left'] : ['above', 'below', 'right', 'left']);
     }
@@ -388,7 +421,9 @@ function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly, set) {
         if (showVertex && Math.abs(r[0] - vpx) < MIN_SEP && Math.abs(r[1] - vpy) < MIN_SEP) {
             continue;
         }
-        putLabel(ctx, '(' + num.fmt2(quad.roots[i]) + ',0)', r[0], r[1], cR, W, H, placed,
+        const rTag = (quad.labelRoots && quad.labelRoots[i])
+            ? quad.labelRoots[i] : ('(' + num.fmt2(quad.roots[i]) + ',0)');
+        putLabel(ctx, rTag, r[0], r[1], cR, W, H, placed,
             ['below', 'above', 'right', 'left']);
     }
 
@@ -404,7 +439,8 @@ function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly, set) {
             }
         }
         if (!skip) {
-            putLabel(ctx, '(0,' + num.fmt2(cy) + ')', ypx, ypy, cY, W, H, placed,
+            const yTag = quad.labelYint || ('(0,' + num.fmt2(cy) + ')');
+            putLabel(ctx, yTag, ypx, ypy, cY, W, H, placed,
                 ['left', 'right', 'above']);
         }
     }
@@ -476,18 +512,21 @@ export default {
         // 画面等级：0 流畅 / 1 标准 / 2 精细。三个参数直接决定每帧的 canvas 调用次数，
         // 而调用次数是本应用在真机上最敏感的指标（一次重绘上千次调用会撑不住）。
         // 已经整体下调过一轮：曲线采样减半、网格与刻度都更稀。
+        // 画面等级：0 流畅 / 1 标准 / 2 精细。
+        //
+        // 这三个参数直接决定每帧的 canvas 调用次数，而调用次数是本应用在真机上
+        // 最敏感的指标 —— 真机实测：绘图页一次重绘超过约 300 次调用后，
+        // 从编辑页返回、松手结束平移这类"触发一次完整重绘"的动作就会崩。
+        // 键盘页只有 54 次调用，从不崩，所以这里把绘图页也往那个量级压。
+        //
+        // 采样点既是表达式求值次数，也是一次 lineTo，是绝对大头：
+        //   流畅 304px 画布约每 10 像素一个点（30 点），标准约每 6 像素（50 点），
+        //   精细约每 4 像素（76 点）。折线在 466 圆屏上仍然看得出是曲线。
         const q = (typeof o.quality === 'number') ? o.quality : 1;
-        const gridTarget = (q >= 2) ? 8 : (q <= 0 ? 3 : 5);
-        const tickTarget = (q >= 2) ? 4 : (q <= 0 ? 2 : 2);
-        // 曲线采样分三档。每个采样点都是一次 lineTo（外加一次表达式求值），
-        // 这是每帧最大的开销来源，所以砍得最狠：标准档 304px 画布上约每 3 像素一个点，
-        // 折线看上去依然是光滑曲线，但 lineTo 次数从 304 降到 100。
-        // 每个采样点 = 一次表达式求值 + 一次 lineTo，是绘图页的绝对大头
-        // （5 条曲线时占全部 canvas 调用的 8 成）。标准档每 4 像素一个点，
-        // 折线在 466 圆屏上看上去依然是曲线，但调用数从 505 降到 380。
-        const sampleSteps = (q >= 2) ? Math.floor(W / 2)
-            : (q <= 0 ? Math.floor(W / 6) : Math.floor(W / 4));
-        // 曲线入场动画的横向进度（1 表示完整）
+        const gridTarget = (q >= 2) ? 6 : (q <= 0 ? 2 : 4);
+        const tickTarget = (q >= 2) ? 3 : (q <= 0 ? 1 : 2);
+        const sampleSteps = (q >= 2) ? Math.floor(W / 4)
+            : (q <= 0 ? Math.floor(W / 10) : Math.floor(W / 6));
 
         drawGrid(ctx, W, H, v, gridTarget);
         drawAxes(ctx, W, H, v);
@@ -499,8 +538,11 @@ export default {
             const ev = (typeof f.fn === 'function') ? f.fn : fallbackEval(f.ast);
             if (ev) { drawCurve(ctx, ev, f.color, W, H, v, lw, sampleSteps); }
         }
-        // 标注共用一个 placed 表，多条函数之间也会互相避让
-        const placed = [];
+        // 标注共用一个 placed 表，多条函数之间也会互相避让。
+        // 复用模块级数组 + 每帧重置对象池，让这次重绘不再产生这些小对象。
+        resetBoxPool();
+        const placed = PLACED_BUF;
+        placed.length = 0;
         if (markAll) {
             // 全部同屏：每条二次函数都标出顶点（用各自曲线的颜色）。
             // 交点是否一并标出取决于曲线条数：

@@ -156,7 +156,7 @@ async function runLogic() {
   chk('plot 不产生 NaN 坐标', m.bad.length === 0, m.bad.slice(0, 4).join(','));
   const moves = m.ops.filter((o) => o[0] === 'moveTo').length;
   const lines = m.ops.filter((o) => o[0] === 'lineTo').length;
-  chk('生成折线路径', moves > 20 && lines > 250, 'moveTo=' + moves + ' lineTo=' + lines);
+  chk('生成折线路径', moves > 15 && lines > 150, 'moveTo=' + moves + ' lineTo=' + lines);
   chk('渐近线断点生效', moves > 12, 'moveTo=' + moves);
   const texts = m.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
   chk('标注含"最小"/"最大"', texts.some((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0));
@@ -269,7 +269,7 @@ async function runLogic() {
   chk('默认曲线粗细 3px（与改版前一致）', settings.snapshot().width === 3, settings.snapshot().width);
   chk('默认显示交点', settings.snapshot().showRoots === 1, settings.snapshot().showRoots);
   chk('默认点标记 3px', settings.snapshot().dotSize === 3, settings.snapshot().dotSize);
-  chk('默认显示对称轴', settings.snapshot().showAxis === 1, settings.snapshot().showAxis);
+  chk('默认隐藏对称轴（一条轴 24 次 canvas 调用，默认关掉）', settings.snapshot().showAxis === 0, settings.snapshot().showAxis);
   chk('粗细显示文本带单位', settings.textOf(0).indexOf('px') > 0, settings.textOf(0));
   settings.next(0);
   chk('粗细循环 中->粗', settings.snapshot().width === 4, settings.snapshot().width);
