@@ -35,7 +35,7 @@ async function runLogic() {
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hanshu-selftest-'));
   const mods = {};
-  for (const n of ['expr', 'num', 'poly', 'plot', 'keypad']) {
+  for (const n of ['expr', 'num', 'poly', 'plot', 'keypad', 'focus']) {
     let c = fs.readFileSync(path.join(COMMON, n + '.js'), 'utf8');
     c = c.replace(/from '\.\/([a-z0-9]+)'/g, "from './$1.mjs'");
     const f = path.join(tmp, n + '.mjs');
@@ -43,6 +43,7 @@ async function runLogic() {
     mods[n] = await import(pathToFileURL(f).href);
   }
   const expr = mods.expr.default, num = mods.num.default, poly = mods.poly.default, plot = mods.plot.default;
+  const focus = mods.focus.default;
   KEYPAD = mods.keypad.default;
 
   const ev = (src, x) => { const r = expr.parse(src); return r.ok ? expr.calc(r.ast, x) : 'ERR:' + r.msg; };
@@ -85,6 +86,17 @@ async function runLogic() {
   chk('x^2/2-3 系数 a=0.5 c=-3', q && near(q.a, 0.5) && near(q.c, -3));
   chk('1/x 不识别为二次', quad('1/x') === null);
   chk('sin(x) 不识别为二次', quad('sin(x)') === null);
+
+  // 左右键焦点循环：全部(0) -> 第1条(1) -> ... -> 第n条(n) -> 全部(0)
+  chk('焦点 全部->第1条', focus.stepFocusPos(0, 3, 1) === 1);
+  chk('焦点 第1条->第2条', focus.stepFocusPos(1, 3, 1) === 2);
+  chk('焦点 第3条->全部', focus.stepFocusPos(3, 3, 1) === 0);
+  chk('焦点 全部->第3条(上一个)', focus.stepFocusPos(0, 3, -1) === 3);
+  chk('焦点 第1条->全部(上一个)', focus.stepFocusPos(1, 3, -1) === 0);
+  chk('焦点 n=0 恒为全部', focus.stepFocusPos(0, 0, 1) === 0 && focus.stepFocusPos(5, 0, -1) === 0);
+  chk('焦点 越界夹紧后绕回', focus.stepFocusPos(9, 3, 1) === 0, focus.stepFocusPos(9, 3, 1));
+  chk('焦点 负数夹紧', focus.stepFocusPos(-2, 3, 1) === 1, focus.stepFocusPos(-2, 3, 1));
+  chk('焦点 单条基线 n=1', focus.stepFocusPos(0, 1, 1) === 1 && focus.stepFocusPos(1, 1, 1) === 0);
 
   chk('fmt 抑制浮点误差', num.fmt(0.1 + 0.2) === '0.3');
   chk('fmt2 去掉多余 0', num.fmt2(1.5) === '1.5' && num.fmt2(3) === '3');

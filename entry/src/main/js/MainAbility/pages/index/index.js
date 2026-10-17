@@ -3,6 +3,7 @@ import store from '../../common/store';
 import poly from '../../common/poly';
 import plot from '../../common/plot';
 import keypad from '../../common/keypad';
+import focus from '../../common/focus';
 
 const BG = '#0B0F14';
 const FG = '#E8EEF6';
@@ -44,6 +45,9 @@ let editIdx = -1;
 let fnPage = false;
 // 缩放状态与其它界面状态一样放模块级变量，不写 this（受限 ViewModel）
 let zoomIdx = ZOOM_BASE;
+// 左右键焦点：0 = 全部同屏，1..n = 只显示第 (focusPos-1) 条。
+// 左右键在这个环形序列里走动，所以「全部」和「单独某一条」都能看到。
+let focusPos = 0;
 // 视图中心的世界坐标：滑动平移改这两个值；点绘图区空白处归位
 let viewCx = 0;
 let viewCy = 0;
@@ -181,14 +185,22 @@ export default {
         const s = this.side();
         const ox = Math.floor((W - s) / 2);
         const oy = 66;
-        const it = store.curItem();
 
-        // 顶部标题带上「序号/总数」：切换曲线时数字变化，是 prev / next 生效的直接反馈
+        // focusPos 决定画哪些：0 = 全部同屏，1..total = 只画那一条
         const total = store.count();
+        if (focusPos > total) { focusPos = total; }
         const ci = store.getCur();
+        const list = store.getList();
+        const single = focusPos > 0 ? (focusPos - 1) : -1;
+        const it = single >= 0 ? list[single] : store.curItem();
+
+        // 顶部标题就是左右键是否生效的直接反馈：
+        // 单条模式显示「表达式 + 序号/总数」，全部模式显示条数
         let head = HINT;
         if (it) {
-            head = clip(it.text, 13) + '  ' + (ci + 1) + '/' + total;
+            head = (single >= 0)
+                ? (clip(it.text, 13) + '  ' + (single + 1) + '/' + total)
+                : ('全部 ' + total + ' 条');
         }
         // 基线 44（不是 30）：圆屏顶部收窄，20px 字形的上部若从 y=14 起会越出圆边，
         // 放到 y=28..49 这一段可用宽度才够放 18~20 个字符。
@@ -210,7 +222,8 @@ export default {
             }
         }
 
-        plot.draw(ctx, s, s, store.getList(), store.getCur(), ox, oy, ZOOMS[zoomIdx], viewCx, viewCy);
+        plot.draw(ctx, s, s, (single >= 0) ? [list[single]] : list,
+            (single >= 0) ? 0 : ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy);
 
         if (it && it.pts) {
             ctx.font = '16px sans-serif';
@@ -301,6 +314,16 @@ export default {
             }
         }
         keypad.draw(ctx, W, this.ch, hotZones);
+    },
+
+    // 左右键：在「全部」与逐条之间循环。同时把选中项同步过去，
+    // 特殊点标注才会跟着变 —— 否则画面几乎没变化，按键看起来像没反应。
+    shiftFocus(dir) {
+        const n = store.count();
+        if (n === 0) { return; }
+        focusPos = focus.stepFocusPos(focusPos, n, dir);
+        if (focusPos > 0) { store.setCur(focusPos - 1); }
+        this.repaint();
     },
 
     onTS(e) {
@@ -395,8 +418,8 @@ export default {
             if (zoomIdx < ZOOMS.length - 1) { zoomIdx = zoomIdx + 1; this.repaint(); }
             return;
         }
-        if (a === 'prev') { store.prev(); this.repaint(); return; }
-        if (a === 'next') { store.next(); this.repaint(); return; }
+        if (a === 'prev') { this.shiftFocus(-1); return; }
+        if (a === 'next') { this.shiftFocus(1); return; }
         if (a === 'add') {
             mode = EDIT_MODE;
             editText = '';
@@ -441,6 +464,8 @@ export default {
         mode = PLOT_MODE;
         editMsg = '';
         editIdx = -1;
+        // 保存后直接聚焦到刚保存的那条，按一下就看得见结果
+        focusPos = store.getCur() + 1;
         this.repaint();
     }
 };
