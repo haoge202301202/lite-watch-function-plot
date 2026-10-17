@@ -15,6 +15,10 @@ const HINT = '点 + 添加函数';
 // 可视半宽档位（世界单位）：数值越大视野越广。默认 ±8（ZOOM_BASE）。
 const ZOOMS = [2, 3, 4, 6, 8, 12, 16, 24];
 const ZOOM_BASE = 4;
+// 24px 字形在按钮内垂直居中的基线偏移量。
+// 底部主按钮与缩放键必须共用这一个常量：两处曾各写各的（一处 -24*0.35、一处 +9），
+// 导致缩放键的 +/- 整体下坠约 17px，看起来像"符号掉到了按钮边缘外"。
+const FONT_MID = -24 * 0.35;
 const CALLS = ['sin', 'cos', 'tan', 'ln', 'lg', 'log2',
     'asin', 'acos', 'atan', 'sqrt', 'abs', 'exp'];
 
@@ -206,7 +210,7 @@ export default {
             ctx.fillStyle = zDead[z] ? '#4A5A6E' : FG;
             ctx.font = '24px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(zLabels[z], zXs[z] + zbw / 2, zby + zbh / 2 + 9);
+            ctx.fillText(zLabels[z], zXs[z] + zbw / 2, zby + zbh / 2 + FONT_MID);
             hotZones.push(zXs[z], zby, zbw, zbh, zActs[z]);
         }
 
@@ -233,7 +237,7 @@ export default {
             ctx.fillStyle = FG;
             ctx.font = '24px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(labels[i], x + bw / 2, by + bh / 2 - 24 * 0.35);
+            ctx.fillText(labels[i], x + bw / 2, by + bh / 2 + FONT_MID);
             hotZones.push(x, by, bw, bh, acts[i]);
         }
     },
