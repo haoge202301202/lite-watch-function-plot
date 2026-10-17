@@ -541,16 +541,16 @@ export default {
             ctx.fillStyle = FG;
             ctx.font = '18px HarmonyOS Sans';
             ctx.textAlign = 'left';
-            ctx.fillText(settings.ITEMS[i].label, srx + 16, y + srh / 2 + 6);
+            ctx.fillText(settings.ITEMS[i].label, srx + 16, y + srh / 2 + vMid(18));
 
             ctx.fillStyle = DIM;
             ctx.textAlign = 'right';
             // 值右边缘留到 -38，给箭头留 16px 空隙；之前只留 14px，两者几乎贴在一起
-            ctx.fillText(settings.textOf(i), srx + srw - 38, y + srh / 2 + 6);
+            ctx.fillText(settings.textOf(i), srx + srw - 38, y + srh / 2 + vMid(18));
             // 右侧的小箭头：提示「这一行可以点」，否则纯文字行看不出是可交互的
             ctx.fillStyle = MUTED;
             ctx.textAlign = 'right';
-            ctx.fillText('>', srx + srw - 16, y + srh / 2 + 6);
+            ctx.fillText('>', srx + srw - 16, y + srh / 2 + vMid(18));
 
             hotZones.push(srx, y, srw, srh, 'set' + i);
         }
