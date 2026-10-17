@@ -1,0 +1,4 @@
+<stack class="page" on:touchstart="onTS" on:touchend="onTE">
+    <canvas ref="cv" class="cv" style="width: {{cw}}px; height: {{ch}}px;"></canvas>
+    <text class="dbg">{{dbgText}}</text>
+</stack>

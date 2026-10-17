@@ -1,0 +1,20 @@
+.page {
+    width: 100%;
+    height: 100%;
+    background-color: #0B0F14;
+}
+
+.cv {
+    width: 100%;
+    height: 100%;
+    background-color: #0B0F14;
+}
+
+/* 探针文字：铺满并居中，确保任何情况下都能看清 */
+.dbg {
+    width: 100%;
+    height: 100%;
+    font-size: 30px;
+    color: #FFD166;
+    text-align: center;
+}
