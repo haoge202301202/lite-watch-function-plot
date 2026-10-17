@@ -265,9 +265,16 @@ lineWidth / strokeStyle / stroke / beginPath / moveTo / lineTo / closePath / fon
 | 页面 `this.xxx` 声明检查（防受限 ViewModel 静默失败） | ✅ 通过 |
 | 静态审计（Lite config、接口 @since、资源命名） | ✅ 通过 |
 | hvigor 构建（Lite JS 编译 + 打包，**零 CSS 警告**） | ✅ BUILD SUCCESSFUL |
+| **预览器功能验收**（多函数同屏绘图、正弦/直线曲线渲染、坐标系网格刻度、27 键键盘输入、确定保存、函数页切换） | ✅ **通过** |
 | Lite Wearable 模拟器冒烟 | ⬜ 未执行 |
-| GT 6 真机（canvas 渲染、键盘点按、storage 持久化、尺寸基准） | ⬜ 未执行 |
+| GT 6 真机（canvas 渲染与稳定性、storage 持久化、尺寸基准 466×466） | ⬜ 未执行 |
 
 > 审计脚本报出的 `optional chaining (expr.js:80)` 经逐行核对为**误报**：该脚本用非 UTF-8 方式读取含中文注释的源文件，导致行号错位；用 UTF-8 扫描源文件与转译产物均为 0 命中。
 
-**未在真机验证前，不应宣称已兼容 GT 6。** 重点待验证项：canvas 在 Lite Wearable 真机上的渲染与稳定性（社区有 GT3 表盘使用 canvas 崩溃的个案）、`@system.storage` 读写、以及键盘同屏 20+ 个 `input button` 的点击响应。
+**未在真机验证前，不应宣称已兼容 GT 6。** 预览器验收的是**功能正确性**，不等于真机兼容性。
+重点待验证项：
+
+1. canvas 在 Lite Wearable 真机上的渲染稳定性（社区有 GT3 表盘使用 canvas 崩溃的个案）；
+2. `@system.storage` 在真机上的读写（预览器里不可用，代码已降级为纯内存）；
+3. 尺寸基准：预览器是 454×454，GT6 是 466×466，布局按 `Device.getInfo` 自适应但需真机确认；
+4. 真机 tap 与预览器 click 的事件差异（已同时处理两条路径，但需真机复核）。
