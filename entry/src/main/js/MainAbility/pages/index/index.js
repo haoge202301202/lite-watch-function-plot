@@ -348,13 +348,13 @@ export default {
         ctx.textAlign = 'center';
         ctx.fillStyle = FG;
         ctx.font = '32px sans-serif';
-        ctx.fillText('函数绘图', W / 2, 100);
+        ctx.fillText('函数绘图', W / 2, 92);
 
         // 变量名带 h 前缀，与 drawPlot 的 bw/bh 区分开（自测按名字正则提取几何参数）
         const hbw = 280;
         const hbh = 88;
         const hbx = (W - hbw) / 2;
-        const hys = [150, 262];
+        const hys = [136, 244];
         const labels = ['进入绘图', '设置'];
         const acts = ['gotoPlot', 'gotoSettings'];
         const bgs = [BLUE, BTN];
@@ -367,6 +367,22 @@ export default {
             ctx.fillText(labels[i], W / 2, hys[i] + hbh / 2 + vMid(28));
             hotZones.push(hbx, hys[i], hbw, hbh, acts[i]);
         }
+
+        // 「进入绘图时」开关：左标签 + 右取值，整行可点，点一下换下一个值。
+        // 它和设置页里的「保留上次函数」是同一项（都读 settings），两边改哪边都一样。
+        const kbh = 44;
+        const kby = 352;
+        ctx.fillStyle = BTN;
+        ctx.fillRect(hbx, kby, hbw, kbh);
+        const keepIdx = settings.count() - 1;
+        ctx.fillStyle = DIM;
+        ctx.font = '18px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('进入绘图时', hbx + 16, kby + kbh / 2 + vMid(18));
+        ctx.fillStyle = FG;
+        ctx.textAlign = 'right';
+        ctx.fillText(settings.textOf(keepIdx), hbx + hbw - 16, kby + kbh / 2 + vMid(18));
+        hotZones.push(hbx, kby, hbw, kbh, 'set' + keepIdx);
     },
 
     // 设置界面：逐行列出，点一行就切到下一个取值
@@ -379,9 +395,9 @@ export default {
         ctx.fillText('设置', W / 2, 74);
 
         const srw = 300;
-        const srh = 60;
+        const srh = 54;
         const srx = (W - srw) / 2;
-        const sry0 = 106;
+        const sry0 = 102;
         const n = settings.count();
         for (let i = 0; i < n; i++) {
             const y = sry0 + i * srh;
@@ -403,7 +419,7 @@ export default {
         const obw = 120;
         const obh = 46;
         const obx = (W - obw) / 2;
-        const oby = sry0 + n * srh + 16;
+        const oby = sry0 + n * srh + 12;
         ctx.fillStyle = BTN;
         ctx.fillRect(obx, oby, obw, obh);
         ctx.fillStyle = FG;
@@ -527,13 +543,16 @@ export default {
 
     act(a) {
         if (a === 'gotoPlot') {
-            // 每次从开始界面进入绘图都从空白开始：清掉上次的函数，
-            // 并把缩放/平移/焦点一起复位，避免「进去看到的是上次的残留」。
-            store.clearAll();
-            focusPos = 0;
-            viewCx = 0;
-            viewCy = 0;
-            zoomIdx = ZOOM_BASE;
+            // 开关决定「每次重来」还是「接着上次」：
+            //   每次重来 —— 清空函数并把缩放/平移/焦点一起复位；
+            //   接着上次 —— 原样恢复（函数列表本来就写在 storage 里，跨会话也在）。
+            if (settings.snapshot().keepLast !== 1) {
+                store.clearAll();
+                focusPos = 0;
+                viewCx = 0;
+                viewCy = 0;
+                zoomIdx = ZOOM_BASE;
+            }
             mode = PLOT_MODE;
             this.repaint();
             return;

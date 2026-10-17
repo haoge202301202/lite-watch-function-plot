@@ -265,7 +265,7 @@ async function runLogic() {
 
   // ---- 设置项：默认值必须与改版前的外观一致，循环切换要能绕回 ----
   settings.reset();
-  chk('设置项共 4 项', settings.count() === 4, settings.count());
+  chk('设置项共 5 项（含「保留上次函数」）', settings.count() === 5, settings.count());
   chk('默认曲线粗细 3px（与改版前一致）', settings.snapshot().width === 3, settings.snapshot().width);
   chk('默认显示交点', settings.snapshot().showRoots === 1, settings.snapshot().showRoots);
   chk('默认点标记 3px', settings.snapshot().dotSize === 3, settings.snapshot().dotSize);
@@ -283,6 +283,12 @@ async function runLogic() {
   chk('负下标夹紧到首项', settings.snapshot().dotSize === 2, settings.snapshot().dotSize);
   settings.reset();
   chk('reset 回到默认值', settings.snapshot().dotSize === 3 && settings.snapshot().width === 3);
+  chk('默认每次重来（keepLast=0）', settings.snapshot().keepLast === 0, settings.snapshot().keepLast);
+  chk('保留开关显示文本', settings.textOf(4) === '每次重来', settings.textOf(4));
+  settings.next(4);
+  chk('切到接着上次（keepLast=1）', settings.snapshot().keepLast === 1, settings.snapshot().keepLast);
+  chk('切到接着上次的显示文本', settings.textOf(4) === '接着上次', settings.textOf(4));
+  settings.reset();
 
   // ---- 外观设置真正作用到绘制 ----
   const mApp = makeCtx();
@@ -459,9 +465,12 @@ function runGeom() {
   const hysM = idxSrc.match(/const hys = \[(\d+), (\d+)\];/);
   const hy1 = hysM ? Number(hysM[1]) : 150;
   const hy2 = hysM ? Number(hysM[2]) : 262;
-  check('开始界面 标题', center(128), 74, 128, 32);
+  const kbh = pick(/const kbh = (\d+);/, 44);
+  const kby = pick(/const kby = (\d+);/, 352);
+  check('开始界面 标题', center(128), 66, 128, 32);
   check('开始界面 按钮1(进入绘图)', center(hbw), hy1, hbw, hbh);
   check('开始界面 按钮2(设置)', center(hbw), hy2, hbw, hbh);
+  check('开始界面 保留开关行', center(hbw), kby, hbw, kbh);
 
   // 设置界面：标题 + 4 行（对应 settings.ITEMS）+ 返回键
   const srw = pick(/const srw = (\d+);/, 300);
@@ -469,14 +478,14 @@ function runGeom() {
   const sry0 = pick(/const sry0 = (\d+);/, 106);
   const obw = pick(/const obw = (\d+);/, 120);
   const obh = pick(/const obh = (\d+);/, 46);
-  const rows = 4;
-  chk('设置界面行数与 settings.ITEMS 一致(4)', rows === 4);
+  const rows = 5;
+  chk('设置界面行数与 settings.ITEMS 一致(5)', rows === 5);
   check('设置界面 标题', center(56), 48, 56, 28);
   check('设置界面 首行', center(srw), sry0 + 3, srw, srh - 6);
   check('设置界面 末行', center(srw), sry0 + (rows - 1) * srh + 3, srw, srh - 6);
-  check('设置界面 返回键', center(obw), sry0 + rows * srh + 16, obw, obh);
-  chk('设置界面纵向不越出屏幕', sry0 + rows * srh + 16 + obh <= H,
-    (sry0 + rows * srh + 16 + obh) + ' / ' + H);
+  check('设置界面 返回键', center(obw), sry0 + rows * srh + 12, obw, obh);
+  chk('设置界面纵向不越出屏幕', sry0 + rows * srh + 12 + obh <= H,
+    (sry0 + rows * srh + 12 + obh) + ' / ' + H);
 
   // 缩放档位表：必须递增，且默认索引落在表内
   const zoomsM = idxSrc.match(/const ZOOMS = \[([\d.,\s]+)\];/);
