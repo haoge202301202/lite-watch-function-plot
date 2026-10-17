@@ -134,6 +134,31 @@ async function runLogic() {
   try { plot.draw(m2.ctx, 270, 270, [], -1); } catch (e) { threw2 = e.message; }
   chk('空函数列表不抛异常', threw2 === null, threw2);
 
+  // 视图平移：makeView 的中心偏移与非法值回落
+  const vBase = plot.makeView(288, 288, 8, 0, 0);
+  chk('makeView 默认居中 ±8',
+    vBase.xmin === -8 && vBase.xmax === 8 && vBase.ymin === -8 && vBase.ymax === 8,
+    JSON.stringify(vBase));
+  const vPan = plot.makeView(288, 288, 8, 3, -2);
+  chk('makeView 支持中心偏移 (3,-2)',
+    vPan.xmin === -5 && vPan.xmax === 11 && vPan.ymin === -10 && vPan.ymax === 6,
+    JSON.stringify(vPan));
+  const vBadC = plot.makeView(288, 288, 8, NaN, undefined);
+  chk('makeView 非法中心值回落 0', vBadC.xmin === -8 && vBadC.ymin === -8, JSON.stringify(vBadC));
+  const vZoomPan = plot.makeView(288, 288, 2, 1, 1);
+  chk('缩放与平移可叠加 ±2 @ (1,1)',
+    vZoomPan.xmin === -1 && vZoomPan.xmax === 3 && vZoomPan.ymin === -1 && vZoomPan.ymax === 3,
+    JSON.stringify(vZoomPan));
+
+  const mPan = makeCtx();
+  let threwPan = null;
+  try { plot.draw(mPan.ctx, 288, 288, funcs, 0, 89, 66, 8, 5, -3); } catch (e) { threwPan = e.message; }
+  chk('平移后绘制不抛异常且无 NaN', threwPan === null && mPan.bad.length === 0,
+    threwPan || mPan.bad.slice(0, 4).join(','));
+  const m0 = makeCtx();
+  plot.draw(m0.ctx, 288, 288, funcs, 0, 89, 66);
+  chk('不传 half/cx/cy 时仍按默认视野绘制', m0.bad.length === 0, m0.bad.slice(0, 4).join(','));
+
   console.log('  逻辑断言通过 ' + pass + ' 项（失败 ' + fail + ' 项）');
   fs.rmSync(tmp, { recursive: true, force: true });
 }

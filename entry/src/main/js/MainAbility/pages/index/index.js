@@ -19,6 +19,13 @@ const ZOOM_BASE = 4;
 // 底部主按钮与缩放键必须共用这一个常量：两处曾各写各的（一处 -24*0.35、一处 +9），
 // 导致缩放键的 +/- 整体下坠约 17px，看起来像"符号掉到了按钮边缘外"。
 const FONT_MID = -24 * 0.35;
+// 滑动平移相关：DRAG_MIN 是判定"拖动"而非"点击"的累计位移阈值（像素），
+// 低于它的抖动一律当点击处理，否则按按钮时手指微动就会把视图带跑。
+const DRAG_MIN = 8;
+// 拖动中的重绘节流（毫秒）：每次重绘都要重算全部曲线，轻手表堆只有 64KB，不能跟着手指逐帧画。
+const PAN_REPAINT_MS = 90;
+// 平移上限（世界单位）：防止滑太远之后彻底迷路。
+const PAN_LIMIT = 160;
 const CALLS = ['sin', 'cos', 'tan', 'ln', 'lg', 'log2',
     'asin', 'acos', 'atan', 'sqrt', 'abs', 'exp'];
 
@@ -34,6 +41,17 @@ let editIdx = -1;
 let fnPage = false;
 // 缩放状态与其它界面状态一样放模块级变量，不写 this（受限 ViewModel）
 let zoomIdx = ZOOM_BASE;
+// 视图中心的世界坐标：滑动平移改这两个值；点绘图区空白处归位
+let viewCx = 0;
+let viewCy = 0;
+// 拖动识别
+let dragValid = false;
+let dragLastX = 0;
+let dragLastY = 0;
+let dragDist = 0;
+let dragging = false;
+let suppressClick = false;
+let lastPanAt = 0;
 let startX = 0;
 let startY = 0;
 // 防抖：同一次点击会先派发 touchend、再派发 click，
@@ -54,6 +72,14 @@ function findHot(gx, gy) {
         }
     }
     return null;
+}
+
+// 平移量夹紧：NaN（比如没拿到画布边长）一律归零，避免污染坐标系
+function clampPan(v) {
+    if (typeof v !== 'number' || !isFinite(v)) { return 0; }
+    if (v > PAN_LIMIT) { return PAN_LIMIT; }
+    if (v < -PAN_LIMIT) { return -PAN_LIMIT; }
+    return v;
 }
 
 function clip(s, n) {
@@ -182,7 +208,7 @@ export default {
             }
         }
 
-        plot.draw(ctx, s, s, store.getList(), store.getCur(), ox, oy, ZOOMS[zoomIdx]);
+        plot.draw(ctx, s, s, store.getList(), store.getCur(), ox, oy, ZOOMS[zoomIdx], viewCx, viewCy);
 
         if (it && it.pts) {
             ctx.font = '16px sans-serif';
@@ -214,11 +240,13 @@ export default {
             hotZones.push(zXs[z], zby, zbw, zbh, zActs[z]);
         }
 
-        // 绘图区右下角标出当前视野半宽，缩放幅度一目了然
+        // 绘图区右下角标出当前视野半宽；已平移时换高亮色并加"已移"，提示视图偏离了原点
+        const panned = (viewCx !== 0 || viewCy !== 0);
         ctx.font = '14px sans-serif';
-        ctx.fillStyle = '#4A5A6E';
+        ctx.fillStyle = panned ? '#4E90C4' : '#4A5A6E';
         ctx.textAlign = 'right';
-        ctx.fillText('\u00b1' + ZOOMS[zoomIdx], ox + s - 6, oy + s - 6);
+        ctx.fillText(panned ? ('\u00b1' + ZOOMS[zoomIdx] + ' \u5df2\u79fb') : ('\u00b1' + ZOOMS[zoomIdx]),
+            ox + s - 6, oy + s - 6);
 
         // 底部按钮 + 热区。尺寸按圆屏安全区反推：
         // 按钮行最外下角必须落在 r=233 圆内，否则两侧会被圆边裁掉、点不到。
@@ -240,6 +268,10 @@ export default {
             ctx.fillText(labels[i], x + bw / 2, by + bh / 2 + FONT_MID);
             hotZones.push(x, by, bw, bh, acts[i]);
         }
+
+        // 绘图区本身作为「归位」热区，放在最后：findHot 按顺序匹配，
+        // 上面的缩放键与底部按钮会先命中，落到这里的才是真正的空白处点击。
+        hotZones.push(ox, oy, s, s, 'recenter');
     },
 
     drawEdit(ctx, W) {
@@ -270,24 +302,57 @@ export default {
     },
 
     onTS(e) {
+        dragValid = false;
+        dragDist = 0;
+        dragging = false;
         if (e && typeof e.globalX === 'number') {
             startX = e.globalX;
             startY = e.globalY;
+            dragLastX = e.globalX;
+            dragLastY = e.globalY;
+            dragValid = true;
+        }
+    },
+
+    // 滑动平移：只在绘图模式生效。累计位移超过 DRAG_MIN 才认为在拖动，
+    // 否则按按钮时手指的细微抖动会把视图带跑。
+    onTM(e) {
+        if (mode !== PLOT_MODE || !dragValid) { return; }
+        if (!e || typeof e.globalX !== 'number') { return; }
+        const dx = e.globalX - dragLastX;
+        const dy = e.globalY - dragLastY;
+        dragLastX = e.globalX;
+        dragLastY = e.globalY;
+        dragDist += Math.abs(dx) + Math.abs(dy);
+        if (dragDist < DRAG_MIN) { return; }
+        dragging = true;
+        const s = this.side();
+        if (!(s > 0)) { return; }
+        // 手指右移 => 图像右移 => 视图中心左移；屏幕 y 向下而世界 y 向上，故 y 取反
+        const k = 2 * ZOOMS[zoomIdx] / s;
+        viewCx = clampPan(viewCx - dx * k);
+        viewCy = clampPan(viewCy + dy * k);
+        // 拖动中限频重绘：每次重绘都要重算全部曲线，跟不上手指的采样率
+        const t = nowMs();
+        if (t - lastPanAt >= PAN_REPAINT_MS) {
+            lastPanAt = t;
+            this.repaint();
         }
     },
 
     onTE(e) {
-        let gx = startX;
-        let gy = startY;
-        if (e && typeof e.globalX === 'number' && (e.globalX !== 0 || e.globalY !== 0)) {
-            gx = e.globalX;
-            gy = e.globalY;
+        if (dragging) {
+            dragging = false;
+            suppressClick = true;   // 拖动过就不再当点击处理，避免误触按钮
+            this.repaint();         // 松手补画一次，确保停在准确位置
+            return;
         }
         // 以按下点判定更稳（抬起点可能被拖动带偏）
         this.dispatch(startX, startY);
     },
 
     onClick(e) {
+        if (suppressClick) { suppressClick = false; return; }
         let gx = -1;
         let gy = -1;
         if (e) {
@@ -311,6 +376,14 @@ export default {
     },
 
     act(a) {
+        if (a === 'recenter') {
+            if (viewCx !== 0 || viewCy !== 0) {
+                viewCx = 0;
+                viewCy = 0;
+                this.repaint();
+            }
+            return;
+        }
         if (a === 'zoomin') {
             if (zoomIdx > 0) { zoomIdx = zoomIdx - 1; this.repaint(); }
             return;

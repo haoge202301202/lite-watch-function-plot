@@ -33,21 +33,21 @@ function syOf(y, H, v) {
     return OY + H - (y - v.ymin) * H / (v.ymax - v.ymin);
 }
 
-// 世界坐标窗口：以原点为中心，按画布长宽比扩展，保证图像不被拉伸。
-// half 是可视半宽（世界单位），缩放功能通过它改变视野范围；非法值回落为默认 ±8。
-function makeView(W, H, half) {
+// 世界坐标窗口：以 (cx, cy) 为中心，按画布长宽比扩展，保证图像不被拉伸。
+// half 是可视半宽（世界单位），缩放改它；cx/cy 是视图中心的世界坐标，滑动平移改它们。
+// 任一参数非法都回落到默认值（±8、居中），避免 NaN 渗进坐标系导致 canvas 报参数类型错误。
+function makeView(W, H, half, cx, cy) {
     const h = (typeof half === 'number' && isFinite(half) && half > 0) ? half : 8;
-    const v = { xmin: -h, xmax: h, ymin: -h, ymax: h };
+    const ccx = (typeof cx === 'number' && isFinite(cx)) ? cx : 0;
+    const ccy = (typeof cy === 'number' && isFinite(cy)) ? cy : 0;
+    let hw = h;
+    let hh = h;
     if (W > H) {
-        const k = W / H;
-        v.xmin = -h * k;
-        v.xmax = h * k;
+        hw = h * (W / H);
     } else if (H > W) {
-        const k = H / W;
-        v.ymin = -h * k;
-        v.ymax = h * k;
+        hh = h * (H / W);
     }
-    return v;
+    return { xmin: ccx - hw, xmax: ccx + hw, ymin: ccy - hh, ymax: ccy + hh };
 }
 
 // 1/2/5 x 10^n 形式的“好看”步长
@@ -367,7 +367,7 @@ export default {
     /**
      * 全量重绘。funcs 为曲线记录数组，curIdx 指定要高亮特殊点的那一条。
      */
-    draw: function (ctx, W, H, funcs, curIdx, ox, oy, half) {
+    draw: function (ctx, W, H, funcs, curIdx, ox, oy, half, cx, cy) {
         // 尺寸必须是有限正数，否则后续所有坐标都会是 NaN，
         // canvas 会抛 TypeError: wrong type of argument
         if (typeof W !== 'number' || typeof H !== 'number' || !isFinite(W) || !isFinite(H) || W <= 0 || H <= 0) {
@@ -375,7 +375,7 @@ export default {
         }
         OX = (typeof ox === 'number' && isFinite(ox)) ? ox : 0;
         OY = (typeof oy === 'number' && isFinite(oy)) ? oy : 0;
-        const v = makeView(W, H, half);
+        const v = makeView(W, H, half, cx, cy);
         clear(ctx, W, H);
         drawGrid(ctx, W, H, v);
         drawAxes(ctx, W, H, v);
