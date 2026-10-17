@@ -13,8 +13,11 @@ const BTN = '#1A2330';
 const MAXLEN = 30;
 const HINT = '点 + 添加函数';
 // 可视半宽档位（世界单位）：数值越大视野越广。默认 ±8（ZOOM_BASE）。
-const ZOOMS = [2, 3, 4, 6, 8, 12, 16, 24];
-const ZOOM_BASE = 4;
+// 单次步进保持原来的 1.33~1.5 倍节奏（不改手感），只把两端各扩几档：
+// 下调到 ±0.5 以便放大看顶点/交点附近的局部曲率；上调到 ±48 以便看整体走势。
+// 不再放到 ±64 以上：那时每个采样点跨度超过 0.5 个世界单位，sin/tan 会明显欠采样成锯齿。
+const ZOOMS = [0.5, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48];
+const ZOOM_BASE = 7;
 // 24px 字形在按钮内垂直居中的基线偏移量。
 // 底部主按钮与缩放键必须共用这一个常量：两处曾各写各的（一处 -24*0.35、一处 +9），
 // 导致缩放键的 +/- 整体下坠约 17px，看起来像"符号掉到了按钮边缘外"。
@@ -136,9 +139,9 @@ export default {
     // 四角到圆心距离 = sqrt((s/2)^2 + (233 - oy)^2)，466 屏上 s=292、oy=58 时约 227.9。
     side() {
         let s = this.cw - 60;
-        const lim = this.ch - 178;
+        const lim = this.ch - 162;
         if (s > lim) { s = lim; }
-        if (s > 300) { s = 300; }
+        if (s > 304) { s = 304; }
         if (s < 120) { s = 120; }
         return Math.floor(s);
     },
@@ -213,7 +216,7 @@ export default {
             ctx.font = '16px sans-serif';
             ctx.fillStyle = DIM;
             ctx.textAlign = 'center';
-            ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 21);
+            ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 18);
         }
 
         hotZones = [];
@@ -249,12 +252,12 @@ export default {
 
         // 底部按钮 + 热区。尺寸按圆屏安全区反推：
         // 按钮行最外下角必须落在 r=233 圆内，否则两侧会被圆边裁掉、点不到。
-        // 3x72 + 2x10 = 236 宽，by=oy+s+30 时最远角约 222.8，余量 10px。
-        const bw = 72;
+        // 绘图区放大到 304 后底部空间变窄：3x66 + 2x10 = 218 宽，by=oy+s+22 时最远角约 228.7，余量 4.3px。
+        const bw = 66;
         const bh = 42;
         const gap = 10;
         const bx = (W - (bw * 3 + gap * 2)) / 2;
-        const by = oy + s + 30;
+        const by = oy + s + 22;
         const labels = ['<', '+', '>'];
         const acts = ['prev', 'add', 'next'];
         for (let i = 0; i < 3; i++) {

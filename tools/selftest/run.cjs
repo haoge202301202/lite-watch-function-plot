@@ -159,6 +159,18 @@ async function runLogic() {
   plot.draw(m0.ctx, 288, 288, funcs, 0, 89, 66);
   chk('不传 half/cx/cy 时仍按默认视野绘制', m0.bad.length === 0, m0.bad.slice(0, 4).join(','));
 
+  // 两端极端档位（3 倍放大 / 4 倍缩小）都要能正常出图
+  const vMin = plot.makeView(288, 288, 0.5, 0, 0);
+  chk('最小档 ±0.5', vMin.xmin === -0.5 && vMin.xmax === 0.5, JSON.stringify(vMin));
+  const vMax = plot.makeView(288, 288, 48, 0, 0);
+  chk('最大档 ±48', vMax.xmin === -48 && vMax.xmax === 48, JSON.stringify(vMax));
+  const mExtMin = makeCtx();
+  plot.draw(mExtMin.ctx, 288, 288, funcs, 0, 89, 66, 0.5, 0, 0);
+  chk('±0.5 档绘制无 NaN', mExtMin.bad.length === 0, mExtMin.bad.slice(0, 4).join(','));
+  const mExtMax = makeCtx();
+  plot.draw(mExtMax.ctx, 288, 288, funcs, 0, 89, 66, 48, 0, 0);
+  chk('±48 档绘制无 NaN', mExtMax.bad.length === 0, mExtMax.bad.slice(0, 4).join(','));
+
   console.log('  逻辑断言通过 ' + pass + ' 项（失败 ' + fail + ' 项）');
   fs.rmSync(tmp, { recursive: true, force: true });
 }
@@ -259,19 +271,22 @@ function runGeom() {
   const bh = pick(/const bh = (\d+);/, 42);
   const gap = pick(/const gap = (\d+);/, 10);
   const byOff = pick(/const by = oy \+ s \+ (\d+);/, 30);
-  const limOff = pick(/const lim = this\.ch - (\d+);/, 174);
+  const limOff = pick(/const lim = this\.ch - (\d+);/, 162);
+  const sideCap = pick(/if \(s > (\d+)\) \{ s = \d+; \}/, 304);
   const titleY = pick(/ctx\.fillText\(head, W \/ 2, (\d+)\);/, 44);
+  const ptsOff = pick(/ctx\.fillText\(clip\(it\.pts, 24\), W \/ 2, oy \+ s \+ (\d+)\);/, 18);
 
   let side = W - 60;
   const limH = H - limOff;
   if (side > limH) { side = limH; }
-  if (side > 300) { side = 300; }
+  if (side > sideCap) { side = sideCap; }
   side = Math.floor(side);
 
   console.log('  （参数取自 index.js：oy=' + oy + ' s=' + side + ' bw=' + bw + ' bh=' + bh + ' gap=' + gap + '）');
+  chk('绘图区已达 304 上限（较 v1.2 的 288 放大）', side === sideCap && sideCap >= 304, 'side=' + side + ' cap=' + sideCap);
   check('标题 18字符@20px', center(180), titleY - 16, 180, 21);
   check('绘图区 ' + side, center(side), oy, side, side);
-  check('摘要文字 20字符@16px', center(180), oy + side + 6, 180, 16);
+  check('摘要文字 20字符@16px', center(160), oy + side + ptsOff - 13, 160, 16);
   check('按钮行 3x' + bw, center(bw * 3 + gap * 2), oy + side + byOff, bw * 3 + gap * 2, bh);
 
   // 缩放键浮在绘图区左右上角（index.js 的 zbw / zbh / zby / zXs），同样要落在圆内
@@ -284,7 +299,7 @@ function runGeom() {
   check('缩放键 右 ' + zbw + 'x' + zbh, oxCalc + side - zInset - zbw, oy + zEdge, zbw, zbh);
 
   // 缩放档位表：必须递增，且默认索引落在表内
-  const zoomsM = idxSrc.match(/const ZOOMS = \[([\d,\s]+)\];/);
+  const zoomsM = idxSrc.match(/const ZOOMS = \[([\d.,\s]+)\];/);
   const zoomNums = zoomsM ? zoomsM[1].split(',').map((s) => Number(s.trim())) : [];
   const zoomBase = pick(/const ZOOM_BASE = (\d+);/, -1);
   chk('缩放档位递增且默认索引合法',
