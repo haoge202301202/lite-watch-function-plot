@@ -67,15 +67,29 @@ function makeView(W, H, half, cx, cy) {
     return fillView({ xmin: 0, xmax: 0, ymin: 0, ymax: 0 }, W, H, half, cx, cy);
 }
 
-// 1/2/5 x 10^n 形式的“好看”步长
-function niceStep(range, target) {
-    const raw = range / target;
-    if (!(raw > 0)) { return 1; }
-    const p = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10 + 1e-9));
-    const nor = raw / p;
-    let m = 1;
-    if (nor > 5) { m = 10; } else if (nor > 2) { m = 5; } else if (nor > 1) { m = 2; }
-    return m * p;
+// 1/2/5 x 10^n 形式的“好看”步长（向下取整那一支）
+//
+// 老版本是往上取整（nor>5 → 10、>2 → 5、>1 → 2），再加上刻度用的是 target=1，
+// 结果 step 总是 ≥ 整个视野宽度 —— 刻度标签一个都画不出来，
+// 真机上表现为「坐标轴的坐标没了」，网格也只有中间一条线。
+// 现在改成按「最多几个区间」来挑：先按 range/maxInt 定位量级，
+// 再沿 1/2/5/10 往上找第一个能让区间数落进上限的步长。
+// 容差 +1 是故意的：range=16 时 step=5 会得到 3.2 个区间，比 step=10 的 1.6 个好用得多。
+function niceStep(range, maxInt) {
+    const lim = (typeof maxInt === 'number' && maxInt > 0) ? maxInt : 6;
+    if (!(range > 0) || !isFinite(range)) { return 1; }
+    const p0 = Math.pow(10, Math.floor(Math.log(range / lim) / Math.LN10 + 1e-9));
+    // 候选里带 4：只留 1/2/5/10 的话，±8 的视野只能取 5（3.2 个区间）或 10（1.6 个），
+    // 前者只剩 ±5 两个刻度，后者连一个都画不出来；带 4 就能得到 ±4、±8 四个刻度。
+    const CAND = [1, 2, 4, 5, 10];
+    for (let k = 0; k < 4; k++) {
+        const base = p0 * Math.pow(10, k);
+        for (let i = 0; i < CAND.length; i++) {
+            const st = CAND[i] * base;
+            if (range / st <= lim + 1e-9) { return st; }
+        }
+    }
+    return p0 * 10;
 }
 
 // 无 measureText：中文/全角按一个字号宽，半角按 0.56 字号估算
@@ -92,8 +106,7 @@ function clear(ctx, W, H) {
     ctx.fillRect(OX, OY, W, H);
 }
 
-function drawGrid(ctx, W, H, v, target) {
-    const step = niceStep(v.xmax - v.xmin, target || 8);
+function drawGrid(ctx, W, H, v, step) {
     ctx.strokeStyle = GRID;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -135,38 +148,75 @@ function drawAxes(ctx, W, H, v) {
     ctx.stroke();
 }
 
-function drawTicks(ctx, W, H, v, target) {
-    const step = niceStep(v.xmax - v.xmin, target || 4);
+/**
+ * 坐标轴刻度数字。这是「看得懂坐标系」的关键，一个都不能少。
+ *
+ * 三条硬约束：
+ *  - 数量有上限：x 轴最多 4 个、y 轴最多 4 个，400px 的圆屏上再多就挤成一排；
+ *  - 位置必须夹在绘图区内：平移后坐标原点可能远在画布外（例如 viewCx=160、half=1 时
+ *    px0 会算到 ±24000），把这种坐标直接交给 fillText 是真机上最不该出现的东西；
+ *  - 只跳过 0：原点处两条轴交叉，数字会盖住轴线。
+ */
+const TICK_BASELINE_DX = 17;
+const TICK_LABEL_DY = 5;
+// 刻度文字缓存。同一组 (步长, 首刻度) 算出来的标签串完全一致，
+// 而复用是常态：缩放/平移之后往往还是同一档，反复 num.fmt 出一批新字符串
+// 在 64KB 堆上是实打实的回收压力。命中率接近 100%，代价只有一次字符串比较。
+const TICK_CACHE_N = 12;
+// [0] = x 轴标签表，[1] = y 轴标签表；[2]/[3] 是各自上次的缓存键
+const TICK_LABELS = [[], [], '', ''];
+
+function tickLabels(v, step, axis) {
+    const isX = (axis === 0);
+    const lo = isX ? v.xmin : v.ymin;
+    const hi = isX ? v.xmax : v.ymax;
+    const first = Math.ceil(lo / step) * step;
+    const key = step + '@' + first;
+    const arr = TICK_LABELS[axis];
+    if (key === TICK_LABELS[2 + axis]) { return arr; }
+    arr.length = 0;
+    let val = first;
+    for (let i = 0; i < TICK_CACHE_N && val <= hi + 1e-9; i++) {
+        arr.push(num.fmt(val, 2));
+        val += step;
+    }
+    TICK_LABELS[2 + axis] = key;
+    return arr;
+}
+
+function drawTicks(ctx, W, H, v, step) {
     const px0 = sxOf(0, W, v);
     const py0 = syOf(0, H, v);
     ctx.fillStyle = TICK_C;
     ctx.font = LABEL_FONT;
 
+    // x 轴刻度：画在 x 轴下方；x 轴跑到画布下缘之外时改画在上方
+    let ty = py0 + TICK_BASELINE_DX;
+    if (ty > OY + H - 4) { ty = py0 - 6; }
+    if (ty < OY + 14) { ty = OY + 14; }
+    if (ty > OY + H - 4) { ty = OY + H - 4; }
     ctx.textAlign = 'center';
-    let guard = 0;
+    const xs = tickLabels(v, step, 0);
     let x = Math.ceil(v.xmin / step) * step;
-    while (x <= v.xmax + 1e-9 && guard < 40) {
-        guard++;
-        if (Math.abs(x) > 1e-9) {
-            const px = sxOf(x, W, v);
-            if (px > 12 && px < W - 12) {
-                const ty = (py0 + 17 > H) ? (py0 - 6) : (py0 + 17);
-                ctx.fillText(num.fmt(x, 2), px, ty);
-            }
+    for (let i = 0; i < xs.length; i++) {
+        const px = sxOf(x, W, v);
+        if (Math.abs(x) > 1e-9 && px > OX + 14 && px < OX + W - 14) {
+            ctx.fillText(xs[i], px, ty);
         }
         x += step;
     }
 
+    // y 轴刻度：画在 y 轴右侧；y 轴跑到画布外侧时贴到绘图区边上，绝不喂出画布外的坐标
+    let lx = px0 + 5;
+    if (lx < OX + 4) { lx = OX + 4; }
+    if (lx > OX + W - 34) { lx = OX + W - 34; }
     ctx.textAlign = 'left';
-    guard = 0;
+    const ys = tickLabels(v, step, 1);
     let y = Math.ceil(v.ymin / step) * step;
-    while (y <= v.ymax + 1e-9 && guard < 40) {
-        guard++;
-        if (Math.abs(y) > 1e-9) {
-            const py = syOf(y, H, v);
-            if (py > 12 && py < H - 4) {
-                ctx.fillText(num.fmt(y, 2), px0 + 5, py + 5);
-            }
+    for (let i = 0; i < ys.length; i++) {
+        const py = syOf(y, H, v);
+        if (Math.abs(y) > 1e-9 && py > OY + 14 && py < OY + H - 4) {
+            ctx.fillText(ys[i], lx, py + TICK_LABEL_DY);
         }
         y += step;
     }
@@ -509,8 +559,11 @@ export default {
         //   流畅 304px 画布约每 10 像素一个点（30 点），标准约每 6 像素（50 点），
         //   精细约每 4 像素（76 点）。折线在 466 圆屏上仍然看得出是曲线。
         const q = (typeof o.quality === 'number') ? o.quality : 1;
-        const gridTarget = (q >= 2) ? 6 : (q <= 0 ? 2 : 4);
-        const tickTarget = (q >= 2) ? 3 : (q <= 0 ? 1 : 2);
+        // 网格与刻度共用同一个步长。早先两处各算各的（网格 target=2~6、刻度 target=1），
+        // 于是网格线和刻度数字永远对不上，而且刻度 target=1 意味着「一个区间都拆不出来」——
+        // 数字全部消失。现在只算一次：最多 3 个区间（含端点约 4 条线、3~4 个数字）。
+        const axisMaxInt = (q >= 2) ? 10 : 6;
+        const step = niceStep(v.xmax - v.xmin, axisMaxInt);
         let sampleSteps = (q >= 2) ? Math.floor(W / 4)
             : (q <= 0 ? Math.floor(W / 10) : Math.floor(W / 6));
         // 采样点上再压一道「总量预算」：每个采样点是一次求值 + 一次 lineTo，
@@ -522,9 +575,9 @@ export default {
             if (sampleSteps > cap) { sampleSteps = (cap < 10) ? 10 : cap; }
         }
 
-        drawGrid(ctx, W, H, v, gridTarget);
+        drawGrid(ctx, W, H, v, step);
         drawAxes(ctx, W, H, v);
-        drawTicks(ctx, W, H, v, tickTarget);
+        drawTicks(ctx, W, H, v, step);
         for (let i = 0; i < funcs.length; i++) {
             const f = funcs[i];
             if (!f) { continue; }

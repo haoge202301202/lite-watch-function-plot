@@ -23,6 +23,17 @@ const BLUE_SH = '#1B5FCB';
 const PANEL = '#223143';
 const CARD = { bg: BTN, hl: BTN_HL, sh: BTN_SH };
 const CARD_BLUE = { bg: BLUE, hl: BLUE_HL, sh: BLUE_SH };
+// 到档位尽头时的压暗底色
+const CARD_DEAD = '#151D28';
+// 已平移时视野提示的高亮色
+const PANNED_ON = '#6BA6E8';
+// 字体串全部提成常量：它们每次重绘都要赋给 ctx.font，
+// 若每次都写字面量，引擎每帧都会新建一批字符串 —— 反复缩放/平移时这就是垃圾大户。
+const FONT_14 = '14px HarmonyOS Sans';
+const FONT_20 = '20px HarmonyOS Sans';
+const FONT_22 = '22px HarmonyOS Sans';
+const FONT_26 = '26px HarmonyOS Sans';
+const FONT_28 = '28px HarmonyOS Sans';
 
 // 统一卡片：主体 + 底部 1px 暗边。
 // 原本还有一条顶部高光线，为了压绘制量去掉了 —— 每张卡片少一次 fillRect，
@@ -67,6 +78,16 @@ const HINT = '点 + 添加函数';
 // 现在 ±1 … ±24，默认 ±8（index 6）。
 const ZOOMS = [1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24];
 const ZOOM_BASE = 6;
+// 缩放键的动作名与符号（顺序：先「-」后「+」）
+const Z_ACT = ['zoomout', 'zoomin'];
+const Z_LBL = ['-', '+'];
+// 右下角的视野提示文字预先拼好，重绘时直接取用，不再拼字符串
+const ZOOM_TXT = [];
+const ZOOM_TXT_PAN = [];
+for (let zi = 0; zi < ZOOMS.length; zi++) {
+    ZOOM_TXT.push('±' + ZOOMS[zi]);
+    ZOOM_TXT_PAN.push('±' + ZOOMS[zi] + ' 已移');
+}
 // 24px 字形在按钮内垂直居中的基线偏移量。
 // 底部主按钮与缩放键必须共用这一个常量：两处曾各写各的（一处 -24*0.35、一处 +9），
 // 导致缩放键的 +/- 整体下坠约 17px，看起来像"符号掉到了按钮边缘外"。
@@ -273,7 +294,11 @@ export default {
     // 在触摸/点击回调里直接重绘就会崩 —— 差异不在调用次数，而在"复杂绘制发生在回调里"。
     // 0ms 一次性定时器，不轮询、不常驻；onHide/onDestroy 会清掉。
     repaintDeferred() {
-        cancelDefer();
+        // 已经有一次重绘在排队：不再重排，让它照常执行。
+        // 重绘时读的全是模块级最新状态（mode / zoomIdx / viewCx…），
+        // 所以一次重绘就等价于「把此前所有请求合并」。连续点缩放时这一条直接把
+        // 重绘次数从「一次点击一次」压到「一帧一次」。
+        if (deferTimer !== null) { return; }
         const self = this;
         deferTimer = setTimeout(function () {
             deferTimer = null;
@@ -334,14 +359,22 @@ export default {
         const list = store.getList();
         const it = (ci >= 0 && ci < list.length) ? list[ci] : null;
 
-        // 顶部标题就是左右键是否生效的直接反馈：「表达式 + 序号/总数」
+        // 顶部标题就是左右键是否生效的直接反馈：「表达式 + 序号/总数」。
+        // 结果缓存在曲线记录上（headKey 变了才重算）：
+        // 反复缩放/平移时标题一个字都不会变，没必要每帧都做 prettyExpr + 字符串拼接。
         let head = HINT;
         if (it) {
-            head = clip(prettyExpr(it.text), 13) + '  ' + (ci + 1) + '/' + total;
+            const sk = (ci + 1) * 100 + total;
+            if (it.headKey !== sk) {
+                it.headKey = sk;
+                if (!it.short) { it.short = clip(prettyExpr(it.text), 13); }
+                it.headTxt = it.short + '  ' + (ci + 1) + '/' + total;
+            }
+            head = it.headTxt;
         }
         // 基线 44（不是 30）：圆屏顶部收窄，20px 字形的上部若从 y=14 起会越出圆边，
         // 放到 y=28..49 这一段可用宽度才够放 18~20 个字符。
-        ctx.font = '20px HarmonyOS Sans';
+        ctx.font = FONT_20;
         ctx.fillStyle = it ? FG : DIM;
         ctx.textAlign = 'center';
         ctx.fillText(head, W / 2, 42);
@@ -389,7 +422,7 @@ export default {
         //   与绘图区底边(oy+s)留 2~3px，与按钮行顶边(oy+s+22)留 5px。
         // 之前是 16px / oy+s+18，字的下沿正好压在按钮上被盖住。
         if (it && it.pts) {
-            ctx.font = '14px HarmonyOS Sans';
+            ctx.font = FONT_14;
             ctx.fillStyle = DIM;
             ctx.textAlign = 'center';
             ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 14);
@@ -397,46 +430,46 @@ export default {
 
         hotZones.length = 0;
 
-        // 绘图区上角一排小键：左上角「返」回开始界面，右上角两个缩放。
-        // 圆屏四角本来就被裁切，这三块是天然空位（最远角距圆心约 215px，余量约 18px），
-        // 既不占底部按钮行，也不额外吃高度。画在 plot.draw 之后故覆盖于坐标系之上。
-        const zbw = 42;
-        const zbh = 34;
-        const zby = oy + 8;
-
-        card(ctx, ox + 8, zby, zbw, zbh, CARD);
+        // 绘图区上角：左上角「返」回开始界面，右上角两个缩放。
+        // 尺寸从 42x34 放大到 58x44 / 46x38 —— 原来的「返」在 466 圆屏上只有 9mm 宽，
+        // 手指根本点不准。放大后四角仍在 r=233 的圆内（最远角 220.2 / 217.5，余量 12.8 / 15.5px）。
+        const zby = oy + 4;
+        const retW = 58;
+        const retH = 44;
+        card(ctx, ox + 4, zby, retW, retH, CARD);
         ctx.fillStyle = FG;
-        ctx.font = '20px HarmonyOS Sans';
+        ctx.font = FONT_26;
         ctx.textAlign = 'center';
-        ctx.fillText('返', ox + 8 + zbw / 2, zby + zbh / 2 + vMid(20));
-        hotZones.push(ox + 8, zby, zbw, zbh, 'home');
+        ctx.fillText('返', ox + 4 + retW / 2, zby + retH / 2 + vMid(26));
+        hotZones.push(ox + 4, zby, retW, retH, 'home');
 
-        const zXs = [ox + s - 8 - zbw * 2 - 8, ox + s - 8 - zbw];
-        const zActs = ['zoomout', 'zoomin'];
-        const zLabels = ['-', '+'];
-        // 到档位尽头时按钮变暗，提示已不能再缩放
-        const zDead = [zoomIdx >= ZOOMS.length - 1, zoomIdx <= 0];
+        const zbw = 46;
+        const zbh = 40;
         for (let z = 0; z < 2; z++) {
-            if (zDead[z]) {
-                // 到档位尽头的键只画一个压暗的底，不再加高光，视觉上就是"按不动"
-                ctx.fillStyle = '#151D28';
-                ctx.fillRect(zXs[z], zby, zbw, zbh);
+            const zx = ox + s - 8 - zbw - z * (zbw + 6);
+            const dead = (z === 0) ? (zoomIdx >= ZOOMS.length - 1) : (zoomIdx <= 0);
+            if (dead) {
+                // 到档位尽头的键只画一个压暗的底，视觉上就是"按不动"
+                ctx.fillStyle = CARD_DEAD;
+                ctx.fillRect(zx, zby, zbw, zbh);
             } else {
-                card(ctx, zXs[z], zby, zbw, zbh, CARD);
+                card(ctx, zx, zby, zbw, zbh, CARD);
             }
-            ctx.fillStyle = zDead[z] ? MUTED : FG;
-            ctx.font = '24px HarmonyOS Sans';
+            ctx.fillStyle = dead ? MUTED : FG;
+            ctx.font = FONT_28;
             ctx.textAlign = 'center';
-            ctx.fillText(zLabels[z], zXs[z] + zbw / 2, zby + zbh / 2 + FONT_MID);
-            hotZones.push(zXs[z], zby, zbw, zbh, zActs[z]);
+            ctx.fillText(Z_LBL[z], zx + zbw / 2, zby + zbh / 2 + vMid(28));
+            hotZones.push(zx, zby, zbw, zbh, Z_ACT[z]);
         }
 
-        // 绘图区右下角标出当前视野半宽；已平移时换高亮色并加"已移"，提示视图偏离了原点
+        // 绘图区右下角标出当前视野半宽；已平移时换高亮色并加"已移"，提示视图偏离了原点。
+        // 文字串在模块初始化时就全部拼好（ZOOM_TXT / ZOOM_TXT_PAN），
+        // 每次重绘不再产生任何新字符串 —— 反复缩放最忌讳这种每帧垃圾。
         const panned = (viewCx !== 0 || viewCy !== 0);
-        ctx.font = '14px HarmonyOS Sans';
-        ctx.fillStyle = panned ? '#6BA6E8' : MUTED;
+        ctx.font = FONT_14;
+        ctx.fillStyle = panned ? PANNED_ON : MUTED;
         ctx.textAlign = 'right';
-        ctx.fillText(panned ? ('\u00b1' + ZOOMS[zoomIdx] + ' \u5df2\u79fb') : ('\u00b1' + ZOOMS[zoomIdx]),
+        ctx.fillText(panned ? ZOOM_TXT_PAN[zoomIdx] : ZOOM_TXT[zoomIdx],
             ox + s - 6, oy + s - 6);
 
         // 底部按钮 + 热区。尺寸按圆屏安全区反推：
@@ -599,7 +632,7 @@ export default {
         }
         // 超长时保留尾部而不是头部：用户刚敲的字符在后半段，截掉开头才看得见自己在打什么
         if (txt.length > 20) { txt = '\u2026' + txt.substring(txt.length - 19); }
-        ctx.font = '22px HarmonyOS Sans';
+        ctx.font = FONT_22;
         ctx.fillStyle = color;
         ctx.textAlign = 'center';
         ctx.fillText(txt, W / 2, 72);

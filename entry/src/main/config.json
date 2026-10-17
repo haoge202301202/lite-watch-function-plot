@@ -3,8 +3,8 @@
     "bundleName": "com.example.hanshu",
     "vendor": "example",
     "version": {
-      "code": 1001800,
-      "name": "1.18.0"
+      "code": 1001900,
+      "name": "1.19.0"
     }
   },
   "deviceConfig": {},

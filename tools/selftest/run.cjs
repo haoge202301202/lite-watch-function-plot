@@ -538,16 +538,24 @@ function runGeom() {
     '摘要底 ' + ptsBottom + ' vs 按钮顶 ' + btnTop);
   check('按钮行 3x' + bw, center(bw * 3 + gap * 2), oy + side + byOff, bw * 3 + gap * 2, bh);
 
-  // 缩放键浮在绘图区左右上角（index.js 的 zbw / zbh / zby / zXs），同样要落在圆内
-  const zbw = pick(/const zbw = (\d+);/, 42);
-  const zbh = pick(/const zbh = (\d+);/, 34);
-  const zEdge = pick(/const zby = oy \+ (\d+);/, 8);
-  const zInset = pick(/const zXs = \[ox \+ (\d+),/, 8);
+  // 绘图区上角两排键：左上「返」、右上缩放。四个角都要落在圆内。
+  const zbw = pick(/const zbw = (\d+);/, 46);
+  const zbh = pick(/const zbh = (\d+);/, 38);
+  const zEdge = pick(/const zby = oy \+ (\d+);/, 4);
+  const retW = pick(/const retW = (\d+);/, 58);
+  const retH = pick(/const retH = (\d+);/, 44);
+  const retIn = pick(/card\(ctx, ox \+ (\d+), zby, retW, retH, CARD\);/, 4);
+  const zIn = pick(/const zx = ox \+ s - (\d+) - zbw/, 8);
+  const zGap = pick(/const zx = ox \+ s - \d+ - zbw - z \* \(zbw \+ (\d+)\);/, 6);
   const oxCalc = Math.floor((W - side) / 2);
-  check('缩放键 左 ' + zbw + 'x' + zbh, oxCalc + zInset, oy + zEdge, zbw, zbh);
-  check('缩放键 右 ' + zbw + 'x' + zbh, oxCalc + side - zInset - zbw, oy + zEdge, zbw, zbh);
-  // 绘图区左上角新增的「返」回开始界面键，与缩放键同排
-  check('绘图页 返回键', oxCalc + zInset, oy + zEdge, zbw, zbh);
+  const zxRight = oxCalc + side - zIn - zbw;
+  const zxLeft = zxRight - zbw - zGap;
+  check('缩放键 左 ' + zbw + 'x' + zbh, zxLeft, oy + zEdge, zbw, zbh);
+  check('缩放键 右 ' + zbw + 'x' + zbh, zxRight, oy + zEdge, zbw, zbh);
+  check('绘图页 返回键 ' + retW + 'x' + retH, oxCalc + retIn, oy + zEdge, retW, retH);
+  // 18mm 以上的最小可点尺寸：轻表上小于 40px 的按钮基本点不准
+  chk('返回键不小于 40x40（原 42x34 太难点）', retW >= 40 && retH >= 40, retW + 'x' + retH);
+  chk('缩放键不小于 40x40', zbw >= 40 && zbh >= 40, zbw + 'x' + zbh);
 
   // 开始界面：标题 + 两个入口按钮
   const hbw = pick(/const hbw = (\d+);/, 280);
