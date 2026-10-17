@@ -121,6 +121,10 @@ let animTimer = null;
 // 按下的键（键盘高亮反馈）与其复位定时器
 let pressedKey = '';
 let pressedTimer = null;
+// 界面转场：wipeT 是「尚未揭开」的比例（1 = 全遮，0 = 完全显示）。
+// 用背景色矩形从左往右撤走，做出擦除式转场 —— canvas 没有 alpha，做不了淡入淡出。
+let wipeT = 1;
+let wipeTimer = null;
 
 function stopAnim() {
     if (animTimer !== null) {
@@ -135,6 +139,13 @@ function stopPress() {
         pressedTimer = null;
     }
     pressedKey = '';
+}
+
+function stopWipe() {
+    if (wipeTimer !== null) {
+        clearInterval(wipeTimer);
+        wipeTimer = null;
+    }
 }
 
 // 字号 -> 文字在矩形内垂直居中所需的基线偏移。
@@ -195,11 +206,13 @@ export default {
     onHide() {
         stopAnim();
         stopPress();
+        stopWipe();
     },
 
     onDestroy() {
         stopAnim();
         stopPress();
+        stopWipe();
     },
 
     boot() {
@@ -279,6 +292,12 @@ export default {
             }
         } catch (e) {
             this.dbgText = 'err ' + e;
+        }
+
+        // 转场遮罩：从左往右揭开。多画 1px 防止浮点误差留缝。
+        if (wipeT < 1) {
+            ctx.fillStyle = BG;
+            ctx.fillRect(W * wipeT, 0, W * (1 - wipeT) + 1, H);
         }
     },
 
@@ -481,16 +500,16 @@ export default {
         const kbh = 44;
         const kby = 356;
         card(ctx, hbx, kby, hbw, kbh, CARD);
-        const keepIdx = settings.count() - 1;
+        const keepIdx = settings.indexOf('keepLast');
         ctx.fillStyle = DIM;
         ctx.font = '19px sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText('进入绘图时', hbx + 16, kby + kbh / 2 + vMid(19));
         ctx.fillStyle = FG;
         ctx.textAlign = 'right';
-        ctx.fillText(settings.textOf(keepIdx), hbx + hbw - 30, kby + kbh / 2 + vMid(19));
+        ctx.fillText(settings.textOf(keepIdx), hbx + hbw - 40, kby + kbh / 2 + vMid(19));
         ctx.fillStyle = MUTED;
-        ctx.fillText('>', hbx + hbw - 16, kby + kbh / 2 + vMid(19));
+        ctx.fillText('>', hbx + hbw - 18, kby + kbh / 2 + vMid(19));
         hotZones.push(hbx, kby, hbw, kbh, 'set' + keepIdx);
     },
 
@@ -520,11 +539,12 @@ export default {
 
             ctx.fillStyle = DIM;
             ctx.textAlign = 'right';
-            ctx.fillText(settings.textOf(i), srx + srw - 28, y + srh / 2 + 6);
+            // 值右边缘留到 -38，给箭头留 16px 空隙；之前只留 14px，两者几乎贴在一起
+            ctx.fillText(settings.textOf(i), srx + srw - 38, y + srh / 2 + 6);
             // 右侧的小箭头：提示「这一行可以点」，否则纯文字行看不出是可交互的
             ctx.fillStyle = MUTED;
             ctx.textAlign = 'right';
-            ctx.fillText('>', srx + srw - 14, y + srh / 2 + 6);
+            ctx.fillText('>', srx + srw - 16, y + srh / 2 + 6);
 
             hotZones.push(srx, y, srw, srh, 'set' + i);
         }
@@ -592,6 +612,25 @@ export default {
             }
             self.repaint();
         }, 40);
+    },
+
+    // 界面切换的擦除式转场。动画级别 < 2 时立即完成，等于无转场。
+    startWipe() {
+        stopWipe();
+        if (settings.snapshot().anim < 2) {
+            wipeT = 1;
+            return;
+        }
+        const self = this;
+        wipeT = 0;
+        wipeTimer = setInterval(function () {
+            wipeT = wipeT + 0.18;
+            if (wipeT >= 1) {
+                wipeT = 1;
+                stopWipe();
+            }
+            self.repaint();
+        }, 32);
     },
 
     // 按键高亮反馈：只在编辑键盘上做 —— 绘图页的按钮会牵动整条曲线重绘，太重。
@@ -713,8 +752,18 @@ export default {
             this.repaint();
             return;
         }
-        if (a === 'gotoSettings') { mode = SETTINGS_MODE; this.repaint(); return; }
-        if (a === 'home') { mode = HOME_MODE; this.repaint(); return; }
+        if (a === 'gotoSettings') {
+            mode = SETTINGS_MODE;
+            this.startWipe();
+            this.repaint();
+            return;
+        }
+        if (a === 'home') {
+            mode = HOME_MODE;
+            this.startWipe();
+            this.repaint();
+            return;
+        }
         // 设置项：动作名形如 set0 / set1 / set2 / set3
         if (a.length === 4 && a.substring(0, 3) === 'set') {
             const k = parseInt(a.substring(3), 10);

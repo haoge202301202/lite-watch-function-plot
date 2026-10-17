@@ -297,6 +297,19 @@ async function runLogic() {
   chk('动画级别 完整->关闭', settings.snapshot().anim === 0, settings.snapshot().anim);
   settings.reset();
 
+  // 回归：菜单曾用 count()-1 取「保留上次函数」，加了两项设置后它指到了「画面等级」，
+  // 于是菜单底部开关显示成"标准"。改为按 id 查找后必须钉死这个约束。
+  chk('indexOf 能按 id 定位设置项', settings.indexOf('keepLast') === 4, settings.indexOf('keepLast'));
+  chk('keepLast 不是最后一项（count()-1 会取错）',
+    settings.indexOf('keepLast') !== settings.count() - 1,
+    'idx=' + settings.indexOf('keepLast') + ' last=' + (settings.count() - 1));
+  chk('未知 id 返回 -1', settings.indexOf('nope') === -1);
+  chk('菜单开关取的确实是 keepLast 的文本',
+    settings.textOf(settings.indexOf('keepLast')) === '每次重来',
+    settings.textOf(settings.indexOf('keepLast')));
+  chk('画面等级才是最后一项', settings.indexOf('quality') === settings.count() - 1,
+    settings.indexOf('quality'));
+
   // ---- 外观设置真正作用到绘制 ----
   const mApp = makeCtx();
   plot.draw(mApp.ctx, 304, 304, multi, 1, 81, 66, 8, 0, 0, false,

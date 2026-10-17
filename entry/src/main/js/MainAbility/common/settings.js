@@ -57,6 +57,15 @@ export default {
 
     count: function () { return ITEMS.length; },
 
+    // 按 id 取下标。菜单原先用 count()-1 取「保留上次函数」，
+    // 后来加了两项设置，它悄悄指到了「画面等级」上 —— 直接按 id 查更稳。
+    indexOf: function (id) {
+        for (let i = 0; i < ITEMS.length; i++) {
+            if (ITEMS[i].id === id) { return i; }
+        }
+        return -1;
+    },
+
     // 第 i 项当前的显示文本（数值项带单位后缀）
     textOf: function (i) {
         if (i < 0 || i >= ITEMS.length) { return ''; }
