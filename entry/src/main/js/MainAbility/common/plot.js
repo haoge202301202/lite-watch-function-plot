@@ -239,7 +239,7 @@ function drawTicks(ctx, W, H, v, step) {
  * 遇到 NaN/Infinity（定义域外）或相邻点竖直跳变（1/x、tan 的渐近线）时断开路径，
  * 避免出现横贯画布的假竖线。
  */
-function drawCurve(ctx, evalFn, color, W, H, v, lw, sampleSteps) {
+function drawCurve(ctx, item, color, W, H, v, lw, sampleSteps) {
     const kx = W / (v.xmax - v.xmin);
     let steps = (typeof sampleSteps === 'number' && sampleSteps > 8) ? sampleSteps : (W > 360 ? 360 : W);
     const dx = (v.xmax - v.xmin) / steps;
@@ -260,7 +260,7 @@ function drawCurve(ctx, evalFn, color, W, H, v, lw, sampleSteps) {
 
     for (let i = 0; i <= steps; i++) {
         const x = v.xmin + i * dx;
-        const y = evalFn(x);
+        const y = curveY(item, x);
         if (typeof y !== 'number' || !isFinite(y)) { pen = false; continue; }
         const py = syOf(y, H, v);
         if (py < hiLimit || py > loLimit) { pen = false; continue; }
@@ -310,11 +310,13 @@ function dashedSegments(ctx, x1, y1, x2, y2, dash, gap) {
     return n;
 }
 
-// 只有条目缺少编译闭包时才走这里（自测的手工构造），正常路径不会用到。
-// 闭包在首次使用时才编译，且只在没有 fn 的条目上发生一次。
-function fallbackEval(ast) {
-    if (!ast) { return null; }
-    return expr.compile(ast);
+// 逐点求值：直接用语法树递归。
+// 一条曲线一帧只采样 31 个点，这里省掉的闭包树是常驻内存，
+// 换来的 CPU 差异是微秒级 —— 在 64KB 堆上这笔买卖非常划算。
+function curveY(item, x) {
+    const ast = item.ast;
+    if (!ast) { return NaN; }
+    return expr.calc(ast, x);
 }
 
 function markPoint(ctx, px, py, color, r) {
@@ -585,8 +587,10 @@ export default {
         // 区间上限：流畅 4 / 精细 8。一屏 3~4 个刻度数字就够读，多了反而糊。
         const axisMaxInt = (q >= 2) ? 8 : 4;
         const step = niceStep(v.xmax - v.xmin, axisMaxInt);
-        let sampleSteps = (q >= 2) ? Math.floor(W / 4)
-            : (q <= 0 ? Math.floor(W / 10) : Math.floor(W / 6));
+        // 采样步长再收一档：现在一帧只画一条曲线，但每条曲线都是**一条斜线路径**，
+        // 而真机上出问题的正是路径。304px 画布 60 个点（每 5 像素一个）已经看不出折线。
+        let sampleSteps = (q >= 2) ? Math.floor(W / 5)
+            : (q <= 0 ? Math.floor(W / 10) : Math.floor(W / 7));
         // 采样点上再压一道「总量预算」：每个采样点是一次求值 + 一次 lineTo，
         // 是整次重绘的绝对大头。曲线多了就按条数摊薄，保证总采样数不超过 120，
         // 否则「精细档 + 3 条曲线」会冲到 200 次以上调用 —— 那正是真机崩溃的量级。
@@ -602,9 +606,7 @@ export default {
         for (let i = 0; i < funcs.length; i++) {
             const f = funcs[i];
             if (!f) { continue; }
-            // 正常路径用编译好的闭包；自测里手工构造的条目只有 ast，走兜底
-            const ev = (typeof f.fn === 'function') ? f.fn : fallbackEval(f.ast);
-            if (ev) { drawCurve(ctx, ev, f.color, W, H, v, lw, sampleSteps); }
+            if (f.ast) { drawCurve(ctx, f, f.color, W, H, v, lw, sampleSteps); }
         }
         // 只有一个标注避让表，复用模块级数组 + 每帧重置对象池，
         // 让这次重绘不再产生这些小对象。

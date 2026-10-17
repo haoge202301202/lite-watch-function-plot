@@ -771,6 +771,26 @@ function runLegacyGone() {
     backKey ? 'ok' : '未匹配到退格分支');
   // 空路径 stroke：Lite canvas 对「beginPath 之后没有线段就 stroke」没有行为约定，
   // 真机上疑似把原生路径留在异常状态、到下一次绘制才炸。所有 stroke 都必须有守卫。
+  // 「无论输入什么表达式都提示表达式有误」的根因守卫：
+  // 闭包编译一旦失败，parse 只能返回 ok:false，而语法分析其实是成功的。
+  // 现在求值直接走语法树，编译这一步连同它的失败路径一起删掉了。
+  const exprSrc = fs.readFileSync(path.join(JS, 'common', 'expr.js'), 'utf8');
+  const storeSrc2 = fs.readFileSync(path.join(JS, 'common', 'store.js'), 'utf8');
+  chk('expr 不再提供 compile（闭包编译整体移除）',
+    exprSrc.indexOf('compile: compile') < 0 && exprSrc.indexOf('function compile(') < 0);
+  chk('parse 不再接受 needFn 第二个参数', exprSrc.indexOf('parse: function (src)') >= 0);
+  chk('曲线记录不再存求值闭包', storeSrc2.indexOf('fn: r.fn') < 0 && storeSrc2.indexOf('ast: r.ast') >= 0);
+  chk('绘图求值走语法树', plotSrc.indexOf('expr.calc(ast, x)') >= 0);
+  // 输入行「重叠」：canvas 没有 clearRect，只能整条横带重铺底色。
+  // 横带必须把 22px 字形整个盖住（基线 72、字体度量最高约到 y=50），键盘首行从 107 起。
+  const inTop = Number((idxSrc.match(/const INPUT_TOP = (\d+);/) || [])[1]);
+  const inH = Number((idxSrc.match(/const INPUT_H = (\d+);/) || [])[1]);
+  chk('输入行横带能盖住字形顶部', inTop > 0 && inTop <= 46, 'INPUT_TOP=' + inTop);
+  chk('输入行横带能盖住字形底部', inTop + inH >= 92, '底边=' + (inTop + inH));
+  chk('输入行横带不碰到键盘', inTop + inH <= 107, '底边=' + (inTop + inH));
+  chk('动作开始时就清掉 HML 残留提示（避免与输入行重叠）',
+    idxSrc.indexOf("if (this.dbgText !== '') { this.dbgText = ''; }") >= 0);
+
   const plotSrc2 = fs.readFileSync(path.join(JS, 'common', 'plot.js'), 'utf8');
   const bareStroke = plotSrc2.split('\n').filter((ln) => ln.indexOf('ctx.stroke();') >= 0 && ln.indexOf('if (') < 0);
   chk('plot.js 里没有裸的 ctx.stroke()（都被 if 守卫）', bareStroke.length === 0,

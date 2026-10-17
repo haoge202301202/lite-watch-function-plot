@@ -96,10 +96,11 @@ const FONT_MID = -24 * 0.35;
 // 低于它的抖动一律当点击处理，否则按按钮时手指微动就会把视图带跑。
 const DRAG_MIN = 8;
 // 编辑页顶部「表达式回显」那一条横带的上下界（canvas 没有 clearRect，只能整条重铺底色）。
-// 基线在 y=72、22px 字形约 54..79，所以 52 起、38 高足以盖干净；
-// 键盘首行从 y=107 起，横带不会碰到键。
-const INPUT_TOP = 52;
-const INPUT_H = 38;
+// 基线在 y=72、22px 字形按设备字体度量最高能到 y≈50，所以从 40 起、56 高 ——
+// 原来只给 52..90，字形顶部一两行像素会活下来，看起来就是「上一次的字和这次的叠在一起」。
+// 键盘首行从 y=107 起，横带放到 96 也不会碰到键。
+const INPUT_TOP = 40;
+const INPUT_H = 56;
 // 平移上限（世界单位）：防止滑太远之后彻底迷路。
 const PAN_LIMIT = 160;
 const CALLS = ['sin', 'cos', 'tan', 'ln', 'lg', 'log2',
@@ -399,9 +400,8 @@ export default {
                 } catch (e2) {
                     qf.quad = null;
                 }
-                // 多项式分析只做这一次；之后绘图全走编译好的 fn，AST 可以释放掉，
-                // 每条曲线省下十几个对象 —— 64KB 堆上这点很值。
-                qf.ast = null;
+                // 语法树保留：求值就靠它（闭包编译已经整体移除）。
+                // 每条曲线只留一棵树，多项式分析也只做这一次（quadDone）。
             }
         }
 
@@ -766,6 +766,9 @@ export default {
     },
 
     act(a) {
+        // HML 那层 <text> 是叠在画布之上的：只要还留着上一次的提示（"保存 N/5…"、"平移中…"、错误信息），
+        // 它就会和输入行的 canvas 文字重在一起，看起来正是「输入有重叠」。动作一开始就清掉。
+        if (this.dbgText !== '') { this.dbgText = ''; }
         if (a === 'gotoPlot') {
             // 开关决定「每次重来」还是「接着上次」：
             //   每次重来 —— 清空函数并把缩放/平移/焦点一起复位；
@@ -869,7 +872,19 @@ export default {
         this.repaintInput();
     },
 
+    // 保存。整体包 try/catch：这里面有解析、写入、多项式分析、storage 调用，
+    // 任何一步抛异常都会冒泡到事件回调（那里没人接），表现就是整页黑掉。
     save() {
+        try {
+            this.saveInner();
+        } catch (e) {
+            editMsg = '保存失败，请重试';
+            this.dbgText = '';
+            try { this.repaintInput(); } catch (e2) { /* 连重绘都失败就只能放弃 */ }
+        }
+    },
+
+    saveInner() {
         // 分阶段打标记：如果崩溃，屏幕顶部会留着最后一条，用来定位崩在哪一步
         this.dbgText = '保存 1/5 校验';
         const r = store.check(editText);
@@ -894,7 +909,6 @@ export default {
             } catch (e) {
                 item.quad = null;
             }
-            item.ast = null;
         }
 
         this.dbgText = '保存 4/5 切换界面';

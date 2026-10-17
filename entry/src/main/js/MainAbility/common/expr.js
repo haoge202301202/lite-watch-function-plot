@@ -285,55 +285,20 @@ function evalNode(node, x) {
     return NaN;
 }
 
-/**
- * 把 AST 编译成闭包树，供绘图时逐点求值。
+/*
+ * 这里原本还有一个 compile(ast) —— 把语法树编译成闭包树，绘图时逐点调用。
  *
- * 为什么值得：一条曲线每帧要按像素求值几百次，递归 + switch 分发的开销很可观；
- * 编译成闭包后每次求值只是若干次直接函数调用。
- * 内存上并没有变差 —— 编译完就可以把 AST 丢掉（多项式分析只需在保存时做一次），
- * 闭包数量和原来的 AST 节点数量相当。
+ * 已经删掉，原因有两个，都很实在：
+ *
+ *  1) 它会失败。一旦编译过程中堆上分配不出来（轻表 64KB 量级，画过曲线之后余量很小），
+ *     parse 只能返回 ok:false，而**语法分析本身是成功的** —— 于是用户看到的是
+ *     「无论输入什么表达式都提示表达式有误」，怎么试都存不进去。
+ *  2) 它并不划算。一条曲线一帧只采样 31 个点（304px 画布、流畅档每 10 像素一个点），
+ *     AST 递归求值 31 次的耗时是微秒级，肉眼与闭包版毫无差别；
+ *     而闭包树本身是常驻内存，还要占用一次「语法树 + 闭包树同时存在」的分配峰值。
+ *
+ * 现在求值统一走 evalNode(ast, x)（导出的名字是 calc）。
  */
-function compile(node) {
-    if (!node) { return function () { return NaN; }; }
-    const t = node.t;
-    if (t === 'num') {
-        const v = node.v;
-        return function () { return v; };
-    }
-    if (t === 'var') {
-        return function (x) { return x; };
-    }
-    if (t === 'neg') {
-        const a = compile(node.a);
-        return function (x) { return -a(x); };
-    }
-    if (t === 'add') {
-        const a = compile(node.a), b = compile(node.b);
-        return function (x) { return a(x) + b(x); };
-    }
-    if (t === 'sub') {
-        const a = compile(node.a), b = compile(node.b);
-        return function (x) { return a(x) - b(x); };
-    }
-    if (t === 'mul') {
-        const a = compile(node.a), b = compile(node.b);
-        return function (x) { return a(x) * b(x); };
-    }
-    if (t === 'div') {
-        const a = compile(node.a), b = compile(node.b);
-        return function (x) { return a(x) / b(x); };
-    }
-    if (t === 'pow') {
-        const a = compile(node.a), b = compile(node.b);
-        return function (x) { return Math.pow(a(x), b(x)); };
-    }
-    if (t === 'call') {
-        const f = node.f;
-        const a = compile(node.a);
-        return function (x) { return callFn(f, a(x)); };
-    }
-    return function () { return NaN; };
-}
 
 // 去掉全部空白字符
 function squeeze(src) {
@@ -365,7 +330,7 @@ export default {
     /**
      * 解析用户输入，返回 {ok:true, ast, body} 或 {ok:false, msg}
      */
-    parse: function (src, needFn) {
+    parse: function (src) {
         if (src === null || src === undefined || src === '') {
             return { ok: false, msg: '请先输入表达式' };
         }
@@ -384,14 +349,7 @@ export default {
         if (ast === null) {
             return { ok: false, msg: '表达式格式有误' };
         }
-        // 只有真要画图的路径才编译闭包树。编辑页每按一个键都会走 check()，
-        // 若每次都编译，输入十来个字符就会造出上百个短命闭包 —— 64KB 堆根本扛不住，
-        // 表现就是"输入函数时崩溃"。
-        if (needFn === true) {
-            return { ok: true, ast: ast, body: body, fn: compile(ast) };
-        }
         return { ok: true, ast: ast, body: body };
     },
-    calc: evalNode,
-    compile: compile
+    calc: evalNode
 };

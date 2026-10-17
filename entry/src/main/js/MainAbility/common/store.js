@@ -21,14 +21,15 @@ let loaded = false;
 
 // 由表达式文本构造一条曲线记录；非法返回 null
 function makeItem(src, colorIdx) {
-    // 只有真正入库的曲线才需要编译后的求值闭包
-    const r = expr.parse(src, true);
+    // 只做语法分析，不再编译闭包树。
+    // 编译这一步在真机堆吃紧时会失败，而语法分析是成功的 ——
+    // 那会让用户看到「无论输入什么表达式都提示表达式有误」。
+    // 每条曲线只存一棵语法树：多项式分析和绘图求值都用它。
+    const r = expr.parse(src);
     if (!r.ok) { return null; }
     return {
         src: r.body,
         text: 'y=' + r.body,
-        // fn：编译好的求值闭包，绘图时逐点调用（比每次走 AST 递归快得多）
-        fn: r.fn,
         ast: r.ast,
         color: COLORS[colorIdx % COLORS.length],
         quad: null,
@@ -90,7 +91,7 @@ export default {
 
     add: function (src) {
         if (list.length >= MAXF) {
-            return { ok: false, msg: '\u6700\u591A\u6DFB\u52A0 ' + MAXF + ' \u6761\u66F2\u7EBF' };
+            return { ok: false, msg: '\u5DF2\u6EE1 ' + MAXF + ' \u6761\uFF0C\u5148\u5220\u4E00\u6761' };
         }
         const item = makeItem(src, list.length);
         if (!item) {
@@ -120,9 +121,15 @@ export default {
 
     // 只校验不写入（编辑页实时提示用）
     check: function (src) {
-        const r = expr.parse(src);
-        if (!r.ok) { return { ok: false, msg: r.msg }; }
-        return { ok: true, body: r.body };
+        try {
+            const r = expr.parse(src);
+            if (!r.ok) { return { ok: false, msg: r.msg }; }
+            return { ok: true, body: r.body };
+        } catch (e) {
+            // 解析过程抛异常基本只有一种可能：堆上分配不出来。
+            // 绝不能让它冒泡到事件回调里 —— 那里没人接，表现就是整页黑掉。
+            return { ok: false, msg: '内存不足，请先删掉一条曲线' };
+        }
     },
 
     removeAt: function (i) {
