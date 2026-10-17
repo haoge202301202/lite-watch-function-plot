@@ -132,6 +132,14 @@ export default {
         this.removeAt(cur);
     },
 
+    // 清空全部函数。原地截断而不是重新赋值，避免别处持有的数组引用变成悬空副本。
+    // 用于「返回开始界面后再进入绘图」时重置成空白画布。
+    clearAll: function () {
+        list.length = 0;
+        cur = 0;
+        persist();
+    },
+
     // 首次载入持久化数据；完成后回调，用于触发一次重绘
     load: function (cb) {
         if (loaded) {

@@ -526,7 +526,18 @@ export default {
     },
 
     act(a) {
-        if (a === 'gotoPlot') { mode = PLOT_MODE; this.repaint(); return; }
+        if (a === 'gotoPlot') {
+            // 每次从开始界面进入绘图都从空白开始：清掉上次的函数，
+            // 并把缩放/平移/焦点一起复位，避免「进去看到的是上次的残留」。
+            store.clearAll();
+            focusPos = 0;
+            viewCx = 0;
+            viewCy = 0;
+            zoomIdx = ZOOM_BASE;
+            mode = PLOT_MODE;
+            this.repaint();
+            return;
+        }
         if (a === 'gotoSettings') { mode = SETTINGS_MODE; this.repaint(); return; }
         if (a === 'home') { mode = HOME_MODE; this.repaint(); return; }
         // 设置项：动作名形如 set0 / set1 / set2 / set3

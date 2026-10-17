@@ -39,7 +39,7 @@ async function runLogic() {
   // 写一个内存 stub 顶掉它（get 走 fail 分支 => 用默认值），这样设置逻辑也能断言。
   fs.writeFileSync(path.join(tmp, 'storage-stub.mjs'),
     'export default { get: function (o) { if (o && o.fail) { o.fail(); } }, set: function () {} };\n', 'utf8');
-  for (const n of ['expr', 'num', 'poly', 'plot', 'keypad', 'focus', 'settings']) {
+  for (const n of ['expr', 'num', 'poly', 'plot', 'keypad', 'focus', 'settings', 'store']) {
     let c = fs.readFileSync(path.join(COMMON, n + '.js'), 'utf8');
     c = c.replace(/from '\.\/([a-z0-9]+)'/g, "from './$1.mjs'");
     c = c.replace(/from '@system\.storage'/g, "from './storage-stub.mjs'");
@@ -50,6 +50,7 @@ async function runLogic() {
   const expr = mods.expr.default, num = mods.num.default, poly = mods.poly.default, plot = mods.plot.default;
   const focus = mods.focus.default;
   const settings = mods.settings.default;
+  const store = mods.store.default;
   KEYPAD = mods.keypad.default;
 
   const ev = (src, x) => { const r = expr.parse(src); return r.ok ? expr.calc(r.ast, x) : 'ERR:' + r.msg; };
@@ -302,6 +303,21 @@ async function runLogic() {
     JSON.stringify(offTexts.filter((t) => t.indexOf(',0)') > 0)));
   chk('设置隐藏交点后仍标顶点',
     offTexts.filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0).length === 1);
+
+  // ---- store：从开始界面进入绘图时会 clearAll，这里验证清空语义 ----
+  store.clearAll();
+  chk('clearAll 后列表为空', store.count() === 0, store.count());
+  chk('clearAll 后 curItem 为 null', store.curItem() === null);
+  const addRes = store.add('x^2-1');
+  chk('add 合法表达式成功', addRes.ok === true && store.count() === 1, JSON.stringify(addRes));
+  store.add('2x+1');
+  chk('add 后共 2 条', store.count() === 2, store.count());
+  chk('add 后 curItem 非空', store.curItem() !== null);
+  const badRes = store.add('abc');
+  chk('add 非法表达式被拒绝', badRes.ok === false && store.count() === 2, JSON.stringify(badRes));
+  store.clearAll();
+  chk('clearAll 清空全部（再进绘图即空白）', store.count() === 0, store.count());
+  chk('clearAll 后 curItem 回到 null', store.curItem() === null);
 
   console.log('  逻辑断言通过 ' + pass + ' 项（失败 ' + fail + ' 项）');
   fs.rmSync(tmp, { recursive: true, force: true });
