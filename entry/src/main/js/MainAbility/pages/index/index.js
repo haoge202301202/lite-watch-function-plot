@@ -123,6 +123,20 @@ let okFlag = true;
 // 每次重绘都要重新求值全部曲线，几帧之内就可能触发 OOM 或看门狗。
 // 现在所有交互都是"操作一次、重绘一次"，没有常驻定时器，onHide/onDestroy 也无定时器可清。
 
+// 绘图页的重绘推迟到事件回调返回之后执行。
+// 真机实测规律：键盘页（27 个矩形 + 27 个文字）在点击回调里直接重绘从不崩；
+// 绘图页（路径绘制 + 曲线 + 标注）在触摸/点击回调里直接重绘就会崩。
+// 差异不在调用次数，而在"复杂绘制发生在事件回调里"这件事本身。
+// 这里用 0 毫秒的一次性定时器把绘制挪出回调，不是轮询、也不会常驻。
+let deferTimer = null;
+
+function cancelDefer() {
+    if (deferTimer !== null) {
+        clearTimeout(deferTimer);
+        deferTimer = null;
+    }
+}
+
 // 字号 -> 文字在矩形内垂直居中所需的基线偏移。
 // 早先各处手写偏移（一处 -24*0.35、一处 +9，方向相反）曾让符号整体下坠约 17px，
 // 新增文字统一走这个函数，避免同类问题再出现。
@@ -182,6 +196,14 @@ export default {
      * 早期版本在 onInit 里发起 Device.getInfo / store.load，回调时机不稳定，
      * 曾导致整页不渲染；改成 onShow 后与已验证可用的探针结构一致。
      */
+    onHide() {
+        cancelDefer();
+    },
+
+    onDestroy() {
+        cancelDefer();
+    },
+
     onShow() {
         mode = HOME_MODE;
         editMsg = '';
@@ -236,6 +258,19 @@ export default {
         if (s > 304) { s = 304; }
         if (s < 120) { s = 120; }
         return Math.floor(s);
+    },
+
+    // 绘图页的重绘推迟到当前事件回调返回之后执行。
+    // 实测规律：键盘页在点击回调里直接重绘从不崩，绘图页（路径 + 曲线 + 标注）
+    // 在触摸/点击回调里直接重绘就会崩 —— 差异不在调用次数，而在"复杂绘制发生在回调里"。
+    // 0ms 一次性定时器，不轮询、不常驻；onHide/onDestroy 会清掉。
+    repaintDeferred() {
+        cancelDefer();
+        const self = this;
+        deferTimer = setTimeout(function () {
+            deferTimer = null;
+            self.repaint();
+        }, 0);
     },
 
     repaint() {
@@ -574,7 +609,7 @@ export default {
         if (n === 0) { return; }
         focusPos = focus.stepFocusPos(focusPos, n, dir);
         if (focusPos > 0) { store.setCur(focusPos - 1); }
-        this.repaint();
+        this.repaintDeferred();
     },
 
     onTS(e) {
@@ -625,7 +660,7 @@ export default {
             dragging = false;
             suppressClick = true;   // 拖动过就不再当点击处理，避免误触按钮
             this.dbgText = '';      // 清掉「平移中…」提示
-            this.repaint();         // 整个手势里唯一的一次 canvas 绘制
+            this.repaintDeferred(); // 整个手势里唯一的一次 canvas 绘制
             return;
         }
         // 以按下点判定更稳（抬起点可能被拖动带偏）
@@ -669,7 +704,7 @@ export default {
                 zoomIdx = ZOOM_BASE;
             }
             mode = PLOT_MODE;
-            this.repaint();
+            this.repaintDeferred();
             return;
         }
         if (a === 'gotoSettings') {
@@ -695,16 +730,16 @@ export default {
             if (viewCx !== 0 || viewCy !== 0) {
                 viewCx = 0;
                 viewCy = 0;
-                this.repaint();
+                this.repaintDeferred();
             }
             return;
         }
         if (a === 'zoomin') {
-            if (zoomIdx > 0) { zoomIdx = zoomIdx - 1; this.repaint(); }
+            if (zoomIdx > 0) { zoomIdx = zoomIdx - 1; this.repaintDeferred(); }
             return;
         }
         if (a === 'zoomout') {
-            if (zoomIdx < ZOOMS.length - 1) { zoomIdx = zoomIdx + 1; this.repaint(); }
+            if (zoomIdx < ZOOMS.length - 1) { zoomIdx = zoomIdx + 1; this.repaintDeferred(); }
             return;
         }
         if (a === 'prev') { this.shiftFocus(-1); return; }
@@ -746,15 +781,40 @@ export default {
     },
 
     save() {
+        // 分阶段打标记：如果崩溃，屏幕顶部会留着最后一条，用来定位崩在哪一步
+        this.dbgText = '保存 1/5 校验';
         const r = store.check(editText);
-        if (!r.ok) { editMsg = r.msg; this.repaint(); return; }
+        if (!r.ok) { editMsg = r.msg; this.dbgText = ''; this.repaint(); return; }
+
+        this.dbgText = '保存 2/5 写入';
         const res = (editIdx >= 0) ? store.update(editIdx, editText) : store.add(editText);
-        if (!res.ok) { editMsg = res.msg; this.repaint(); return; }
+        if (!res.ok) { editMsg = res.msg; this.dbgText = ''; this.repaint(); return; }
+
+        this.dbgText = '保存 3/5 算特殊点';
+        // 把二次函数分析提前到保存时做完：绘图那一帧就不再需要跑多项式提取，
+        // 绘制路径上少一件事。
+        const item = store.curItem();
+        if (item && item.ast && !item.quadDone) {
+            item.quadDone = true;
+            try {
+                const q = poly.quadInfo(poly.polyOf(item.ast));
+                if (q) {
+                    item.quad = q;
+                    item.pts = plot.describeQuad(q);
+                }
+            } catch (e) {
+                item.quad = null;
+            }
+            item.ast = null;
+        }
+
+        this.dbgText = '保存 4/5 切换界面';
         mode = PLOT_MODE;
         editMsg = '';
         editIdx = -1;
-        // 保存后直接聚焦到刚保存的那条，按一下就看得见结果
         focusPos = store.getCur() + 1;
-        this.repaint();
+
+        this.dbgText = '保存 5/5 重绘';
+        this.repaintDeferred();
     }
 };

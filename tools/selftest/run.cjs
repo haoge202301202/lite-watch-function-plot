@@ -350,10 +350,15 @@ async function runLogic() {
 
   // 全程无定时器：源码里不该再出现 setInterval / setTimeout
   const idxSrcNoAnim = fs.readFileSync(path.join(ROOT, 'entry', 'src', 'main', 'js', 'MainAbility', 'pages', 'index', 'index.js'), 'utf8');
-  // 只认真正的调用（带左括号）—— 注释里提到过 setInterval 这几个字，不算
-  chk('页面源码中没有任何定时器',
-    idxSrcNoAnim.indexOf('setInterval(') === -1 && idxSrcNoAnim.indexOf('setTimeout(') === -1,
-    'setInterval()=' + (idxSrcNoAnim.indexOf('setInterval(') >= 0) + ' setTimeout()=' + (idxSrcNoAnim.indexOf('setTimeout(') >= 0));
+  // 不允许任何轮询式定时器；setTimeout 只允许"延迟重绘"这一处（一次性，非轮询）
+  const nInterval = idxSrcNoAnim.split('setInterval(').length - 1;
+  const nTimeout = idxSrcNoAnim.split('setTimeout(').length - 1;
+  chk('没有 setInterval 轮询', nInterval === 0, 'setInterval x' + nInterval);
+  chk('setTimeout 只有延迟重绘一处', nTimeout === 1, 'setTimeout x' + nTimeout);
+  chk('延迟重绘在 onHide/onDestroy 里被清理',
+    idxSrcNoAnim.indexOf('cancelDefer()') >= 0 &&
+    idxSrcNoAnim.split('cancelDefer()').length - 1 >= 3,
+    'cancelDefer 调用次数=' + (idxSrcNoAnim.split('cancelDefer()').length - 1));
 
   // ---- store：从开始界面进入绘图时会 clearAll，这里验证清空语义 ----
   store.clearAll();
