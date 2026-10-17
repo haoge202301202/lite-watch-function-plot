@@ -48,7 +48,6 @@ let viewCy = 0;
 let dragValid = false;
 let dragLastX = 0;
 let dragLastY = 0;
-let dragDist = 0;
 let dragging = false;
 let suppressClick = false;
 let lastPanAt = 0;
@@ -303,7 +302,6 @@ export default {
 
     onTS(e) {
         dragValid = false;
-        dragDist = 0;
         dragging = false;
         if (e && typeof e.globalX === 'number') {
             startX = e.globalX;
@@ -323,8 +321,10 @@ export default {
         const dy = e.globalY - dragLastY;
         dragLastX = e.globalX;
         dragLastY = e.globalY;
-        dragDist += Math.abs(dx) + Math.abs(dy);
-        if (dragDist < DRAG_MIN) { return; }
+        // 判定用「相对按下点的位移」，而不是累加路径长度：
+        // 手指在按钮上抖动几下再回到原处，累加值会超标从而把点击误判成拖动，按钮就静默失效了。
+        const moved = Math.abs(e.globalX - startX) + Math.abs(e.globalY - startY);
+        if (moved < DRAG_MIN) { return; }
         dragging = true;
         const s = this.side();
         if (!(s > 0)) { return; }
