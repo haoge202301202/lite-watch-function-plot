@@ -503,13 +503,16 @@ function runGeom() {
     zoomNums.every((v, i) => v > 0 && (i === 0 || v > zoomNums[i - 1])) &&
     zoomBase >= 0 && zoomBase < zoomNums.length,
     'n=' + zoomNums.length + ' base=' + zoomBase + ' 档位=' + JSON.stringify(zoomNums));
-  // 编辑页：键盘直接跑 keypad.js 的真实布局，逐个键的四个角都要在圆内
-  chk('主键盘页键数 = 27（扁平数组 /5）', KEYPAD && KEYPAD.layout(KEYPAD.MAIN_KEYS, W).length / 5 === 27,
-    KEYPAD && KEYPAD.layout(KEYPAD.MAIN_KEYS, W).length / 5);
-  chk('函数键盘页键数 = 27', KEYPAD && KEYPAD.layout(KEYPAD.FN_KEYS, W).length / 5 === 27,
-    KEYPAD && KEYPAD.layout(KEYPAD.FN_KEYS, W).length / 5);
+  // 编辑页：键盘直接跑 keypad.js 的真实布局，逐个键的四个角都要在圆内。
+  // topY 必须从 index.js 提取：早先自测用 layout 的默认值(110)，而页面实际传的是 60，
+  // 于是测试校验的是一个屏幕上根本不存在、也安全得多的布局 —— 真实键盘顶部其实越界 18px。
+  const kbdTop = pick(/keypad\.layout\(rows, W, (\d+)\);/, 100);
+  chk('主键盘页键数 = 27（扁平数组 /5）', KEYPAD && KEYPAD.layout(KEYPAD.MAIN_KEYS, W, kbdTop).length / 5 === 27,
+    KEYPAD && KEYPAD.layout(KEYPAD.MAIN_KEYS, W, kbdTop).length / 5);
+  chk('函数键盘页键数 = 27', KEYPAD && KEYPAD.layout(KEYPAD.FN_KEYS, W, kbdTop).length / 5 === 27,
+    KEYPAD && KEYPAD.layout(KEYPAD.FN_KEYS, W, kbdTop).length / 5);
   function scanKeys(name, rows) {
-    const flat = KEYPAD.layout(rows, W);
+    const flat = KEYPAD.layout(rows, W, kbdTop);
     let worstD = 0, worstLabel = '', over = 0;
     for (let i = 0; i + 4 < flat.length; i += 5) {
       const kx = flat[i], ky = flat[i + 1], kw = flat[i + 2], kh = flat[i + 3], label = flat[i + 4];

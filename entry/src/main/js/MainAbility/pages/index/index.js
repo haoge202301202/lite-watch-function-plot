@@ -499,24 +499,28 @@ export default {
     },
 
     drawEdit(ctx, W) {
-        let txt = editText;
+        let txt = '';
         let color = DIM;
-        if (txt) {
-            color = store.check(txt).ok ? FG : ERR;
-        } else {
-            txt = '输入 y= 右侧表达式';
-        }
         if (editMsg) {
             txt = editMsg;
             color = ERR;
+        } else if (!editText) {
+            txt = '输入 y = 右侧表达式';
+        } else {
+            // 带上 y= 前缀，和最终存下来的形式一致；非法时整串变红
+            txt = 'y = ' + editText;
+            color = store.check(editText).ok ? FG : ERR;
         }
-        ctx.font = '24px sans-serif';
+        // 超长时保留尾部而不是头部：用户刚敲的字符在后半段，截掉开头才看得见自己在打什么
+        if (txt.length > 20) { txt = '\u2026' + txt.substring(txt.length - 19); }
+        ctx.font = '22px sans-serif';
         ctx.fillStyle = color;
         ctx.textAlign = 'center';
-        ctx.fillText(clip(txt, 20), W / 2, 30);
+        ctx.fillText(txt, W / 2, 72);
 
         const rows = fnPage ? keypad.FN_KEYS : keypad.MAIN_KEYS;
-        hotZones = keypad.layout(rows, W, 60);
+        // topY=100：键盘若从 y=60 起，第一行四角距圆心约 251px，超出 r=233 的圆屏会被裁掉
+        hotZones = keypad.layout(rows, W, 100);
         if (editIdx >= 0) {
             for (let i = 4; i < hotZones.length; i += 5) {
                 if (String(hotZones[i]) === '取消') { hotZones[i] = '删除'; }
