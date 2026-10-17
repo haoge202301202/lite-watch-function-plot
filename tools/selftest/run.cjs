@@ -35,15 +35,21 @@ async function runLogic() {
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hanshu-selftest-'));
   const mods = {};
-  for (const n of ['expr', 'num', 'poly', 'plot', 'keypad', 'focus']) {
+  // settings.js 依赖 @system.storage，Node 里没有这个模块；
+  // 写一个内存 stub 顶掉它（get 走 fail 分支 => 用默认值），这样设置逻辑也能断言。
+  fs.writeFileSync(path.join(tmp, 'storage-stub.mjs'),
+    'export default { get: function (o) { if (o && o.fail) { o.fail(); } }, set: function () {} };\n', 'utf8');
+  for (const n of ['expr', 'num', 'poly', 'plot', 'keypad', 'focus', 'settings']) {
     let c = fs.readFileSync(path.join(COMMON, n + '.js'), 'utf8');
     c = c.replace(/from '\.\/([a-z0-9]+)'/g, "from './$1.mjs'");
+    c = c.replace(/from '@system\.storage'/g, "from './storage-stub.mjs'");
     const f = path.join(tmp, n + '.mjs');
     fs.writeFileSync(f, c, 'utf8');
     mods[n] = await import(pathToFileURL(f).href);
   }
   const expr = mods.expr.default, num = mods.num.default, poly = mods.poly.default, plot = mods.plot.default;
   const focus = mods.focus.default;
+  const settings = mods.settings.default;
   KEYPAD = mods.keypad.default;
 
   const ev = (src, x) => { const r = expr.parse(src); return r.ok ? expr.calc(r.ast, x) : 'ERR:' + r.msg; };
@@ -110,14 +116,14 @@ async function runLogic() {
       ops, bad,
       ctx: {
         fillStyle: '', strokeStyle: '', lineWidth: 1, font: '', textAlign: '',
-        fillRect() { scan('fillRect', arguments); ops.push(['fillRect']); },
+        fillRect(x, y, w, h) { scan('fillRect', [x, y, w, h]); ops.push(['fillRect', w, h]); },
         strokeRect() { scan('strokeRect', arguments); },
         fillText(t, x, y) { scan('fillText', [x, y]); ops.push(['fillText', String(t)]); },
         beginPath() { ops.push(['beginPath']); },
         moveTo(x, y) { scan('moveTo', [x, y]); ops.push(['moveTo', x, y]); },
         lineTo(x, y) { scan('lineTo', [x, y]); ops.push(['lineTo', x, y]); },
         closePath() {}, arc() { scan('arc', arguments); }, rect() { scan('rect', arguments); },
-        stroke() { ops.push(['stroke']); }
+        stroke() { ops.push(['stroke', this.lineWidth]); }
       }
     };
   }
@@ -256,6 +262,47 @@ async function runLogic() {
   plot.draw(mNonQuad.ctx, 304, 304, [multi[2]], 0, 81, 66, 8, 0, 0, false);
   chk('非二次函数不画对称轴', !hasVerticalDash(mNonQuad.ops));
 
+  // ---- 设置项：默认值必须与改版前的外观一致，循环切换要能绕回 ----
+  settings.reset();
+  chk('设置项共 4 项', settings.count() === 4, settings.count());
+  chk('默认曲线粗细 3px（与改版前一致）', settings.snapshot().width === 3, settings.snapshot().width);
+  chk('默认显示交点', settings.snapshot().showRoots === 1, settings.snapshot().showRoots);
+  chk('默认点标记 3px', settings.snapshot().dotSize === 3, settings.snapshot().dotSize);
+  chk('默认显示对称轴', settings.snapshot().showAxis === 1, settings.snapshot().showAxis);
+  chk('粗细显示文本带单位', settings.textOf(0).indexOf('px') > 0, settings.textOf(0));
+  settings.next(0);
+  chk('粗细循环 中->粗', settings.snapshot().width === 4, settings.snapshot().width);
+  settings.next(0);
+  chk('粗细循环 粗->细（绕回）', settings.snapshot().width === 2, settings.snapshot().width);
+  settings.next(1);
+  chk('交点开关 显示->隐藏', settings.snapshot().showRoots === 0, settings.snapshot().showRoots);
+  settings.setIdx(2, 99);
+  chk('越界下标夹紧到末项', settings.snapshot().dotSize === 5, settings.snapshot().dotSize);
+  settings.setIdx(2, -3);
+  chk('负下标夹紧到首项', settings.snapshot().dotSize === 2, settings.snapshot().dotSize);
+  settings.reset();
+  chk('reset 回到默认值', settings.snapshot().dotSize === 3 && settings.snapshot().width === 3);
+
+  // ---- 外观设置真正作用到绘制 ----
+  const mApp = makeCtx();
+  plot.draw(mApp.ctx, 304, 304, multi, 1, 81, 66, 8, 0, 0, false,
+    { width: 4, dotSize: 5, showAxis: 1, showRoots: 1 });
+  const strokeW = mApp.ops.filter((o) => o[0] === 'stroke').map((o) => o[1]);
+  chk('曲线线宽按设置生效(4px)', strokeW.indexOf(4) >= 0, JSON.stringify(strokeW));
+  const rectW = mApp.ops.filter((o) => o[0] === 'fillRect').map((o) => o[1]);
+  chk('点标记大小按设置生效(11px)', rectW.indexOf(11) >= 0, JSON.stringify(rectW));
+  chk('对称轴开启时画出虚线', hasVerticalDash(mApp.ops));
+
+  const mOff = makeCtx();
+  plot.draw(mOff.ctx, 304, 304, multi, 1, 81, 66, 8, 0, 0, false, { showAxis: 0, showRoots: 0 });
+  chk('设置关闭对称轴后不画', !hasVerticalDash(mOff.ops));
+  const offTexts = mOff.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
+  chk('设置隐藏交点后不标 x 交点',
+    offTexts.filter((t) => t.indexOf(',0)') > 0).length === 0,
+    JSON.stringify(offTexts.filter((t) => t.indexOf(',0)') > 0)));
+  chk('设置隐藏交点后仍标顶点',
+    offTexts.filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0).length === 1);
+
   console.log('  逻辑断言通过 ' + pass + ' 项（失败 ' + fail + ' 项）');
   fs.rmSync(tmp, { recursive: true, force: true });
 }
@@ -387,6 +434,33 @@ function runGeom() {
   const oxCalc = Math.floor((W - side) / 2);
   check('缩放键 左 ' + zbw + 'x' + zbh, oxCalc + zInset, oy + zEdge, zbw, zbh);
   check('缩放键 右 ' + zbw + 'x' + zbh, oxCalc + side - zInset - zbw, oy + zEdge, zbw, zbh);
+  // 绘图区左上角新增的「返」回开始界面键，与缩放键同排
+  check('绘图页 返回键', oxCalc + zInset, oy + zEdge, zbw, zbh);
+
+  // 开始界面：标题 + 两个入口按钮
+  const hbw = pick(/const hbw = (\d+);/, 280);
+  const hbh = pick(/const hbh = (\d+);/, 88);
+  const hysM = idxSrc.match(/const hys = \[(\d+), (\d+)\];/);
+  const hy1 = hysM ? Number(hysM[1]) : 150;
+  const hy2 = hysM ? Number(hysM[2]) : 262;
+  check('开始界面 标题', center(128), 74, 128, 32);
+  check('开始界面 按钮1(进入绘图)', center(hbw), hy1, hbw, hbh);
+  check('开始界面 按钮2(设置)', center(hbw), hy2, hbw, hbh);
+
+  // 设置界面：标题 + 4 行（对应 settings.ITEMS）+ 返回键
+  const srw = pick(/const srw = (\d+);/, 300);
+  const srh = pick(/const srh = (\d+);/, 60);
+  const sry0 = pick(/const sry0 = (\d+);/, 106);
+  const obw = pick(/const obw = (\d+);/, 120);
+  const obh = pick(/const obh = (\d+);/, 46);
+  const rows = 4;
+  chk('设置界面行数与 settings.ITEMS 一致(4)', rows === 4);
+  check('设置界面 标题', center(56), 48, 56, 28);
+  check('设置界面 首行', center(srw), sry0 + 3, srw, srh - 6);
+  check('设置界面 末行', center(srw), sry0 + (rows - 1) * srh + 3, srw, srh - 6);
+  check('设置界面 返回键', center(obw), sry0 + rows * srh + 16, obw, obh);
+  chk('设置界面纵向不越出屏幕', sry0 + rows * srh + 16 + obh <= H,
+    (sry0 + rows * srh + 16 + obh) + ' / ' + H);
 
   // 缩放档位表：必须递增，且默认索引落在表内
   const zoomsM = idxSrc.match(/const ZOOMS = \[([\d.,\s]+)\];/);

@@ -4,6 +4,7 @@ import poly from '../../common/poly';
 import plot from '../../common/plot';
 import keypad from '../../common/keypad';
 import focus from '../../common/focus';
+import settings from '../../common/settings';
 
 const BG = '#0B0F14';
 const FG = '#E8EEF6';
@@ -37,7 +38,10 @@ const CALLS = ['sin', 'cos', 'tan', 'ln', 'lg', 'log2',
 // 也避免 data 变化触发序列化。
 const PLOT_MODE = 0;
 const EDIT_MODE = 1;
-let mode = PLOT_MODE;
+const HOME_MODE = 2;
+const SETTINGS_MODE = 3;
+// 启动先进开始界面，由用户选择「进入绘图」或「设置」
+let mode = HOME_MODE;
 let hotZones = [];
 let editText = '';
 let editMsg = '';
@@ -64,6 +68,13 @@ let startY = 0;
 // 用「键名 + 时间窗」去重，避免一次点击输入两个字符。
 let lastKey = '';
 let lastAt = 0;
+
+// 字号 -> 文字在矩形内垂直居中所需的基线偏移。
+// 早先各处手写偏移（一处 -24*0.35、一处 +9，方向相反）曾让符号整体下坠约 17px，
+// 新增文字统一走这个函数，避免同类问题再出现。
+function vMid(fs) {
+    return -fs * 0.35;
+}
 
 function nowMs() {
     return (typeof Date.now === 'function') ? Date.now() : new Date().getTime();
@@ -106,7 +117,7 @@ export default {
      * 曾导致整页不渲染；改成 onShow 后与已验证可用的探针结构一致。
      */
     onShow() {
-        mode = PLOT_MODE;
+        mode = HOME_MODE;
         editMsg = '';
         this.repaint();
         this.boot();
@@ -136,6 +147,13 @@ export default {
             });
         } catch (e) {
             // storage 不可用时用空列表
+        }
+        try {
+            settings.load(function () {
+                self.repaint();
+            });
+        } catch (e) {
+            // 设置读不出来就沿用默认外观
         }
     },
 
@@ -173,8 +191,12 @@ export default {
         try {
             if (mode === PLOT_MODE) {
                 this.drawPlot(ctx, W);
-            } else {
+            } else if (mode === EDIT_MODE) {
                 this.drawEdit(ctx, W);
+            } else if (mode === SETTINGS_MODE) {
+                this.drawSettings(ctx, W);
+            } else {
+                this.drawHome(ctx, W);
             }
         } catch (e) {
             this.dbgText = 'err ' + e;
@@ -229,7 +251,8 @@ export default {
 
         // 最后一个参数 markAll：全部模式下每条二次函数都标顶点，单条模式只标当前这条
         plot.draw(ctx, s, s, (single >= 0) ? [list[single]] : list,
-            (single >= 0) ? 0 : ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, single < 0);
+            (single >= 0) ? 0 : ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, single < 0,
+            settings.snapshot());
 
         // 底部摘要：
         //   单条模式 —— 显示当前那条的完整特殊点（最值 / 交点 / 截距）；
@@ -254,13 +277,22 @@ export default {
 
         hotZones = [];
 
-        // 缩放键浮在绘图区左右上角。圆屏四角本来就被裁切，这两块是天然空位：
-        // 466 屏上是 (95,74)/(371,74)，最远角距圆心约 210px，余量 22px，
-        // 既不影响底部 3 个主按钮，也不占额外行高。画在 plot.draw 之后故覆盖于坐标系之上。
+        // 绘图区上角一排小键：左上角「返」回开始界面，右上角两个缩放。
+        // 圆屏四角本来就被裁切，这三块是天然空位（最远角距圆心约 215px，余量约 18px），
+        // 既不占底部按钮行，也不额外吃高度。画在 plot.draw 之后故覆盖于坐标系之上。
         const zbw = 42;
         const zbh = 34;
         const zby = oy + 8;
-        const zXs = [ox + 8, ox + s - 8 - zbw];
+
+        ctx.fillStyle = BTN;
+        ctx.fillRect(ox + 8, zby, zbw, zbh);
+        ctx.fillStyle = FG;
+        ctx.font = '20px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('返', ox + 8 + zbw / 2, zby + zbh / 2 + vMid(20));
+        hotZones.push(ox + 8, zby, zbw, zbh, 'home');
+
+        const zXs = [ox + s - 8 - zbw * 2 - 8, ox + s - 8 - zbw];
         const zActs = ['zoomout', 'zoomin'];
         const zLabels = ['-', '+'];
         // 到档位尽头时按钮变暗，提示已不能再缩放
@@ -307,6 +339,78 @@ export default {
         // 绘图区本身作为「归位」热区，放在最后：findHot 按顺序匹配，
         // 上面的缩放键与底部按钮会先命中，落到这里的才是真正的空白处点击。
         hotZones.push(ox, oy, s, s, 'recenter');
+    },
+
+    // 开始界面：两个大按钮（进入绘图 / 设置）
+    drawHome(ctx, W) {
+        hotZones = [];
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = FG;
+        ctx.font = '32px sans-serif';
+        ctx.fillText('函数绘图', W / 2, 100);
+
+        // 变量名带 h 前缀，与 drawPlot 的 bw/bh 区分开（自测按名字正则提取几何参数）
+        const hbw = 280;
+        const hbh = 88;
+        const hbx = (W - hbw) / 2;
+        const hys = [150, 262];
+        const labels = ['进入绘图', '设置'];
+        const acts = ['gotoPlot', 'gotoSettings'];
+        const bgs = [BLUE, BTN];
+        for (let i = 0; i < 2; i++) {
+            ctx.fillStyle = bgs[i];
+            ctx.fillRect(hbx, hys[i], hbw, hbh);
+            ctx.fillStyle = FG;
+            ctx.font = '28px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(labels[i], W / 2, hys[i] + hbh / 2 + vMid(28));
+            hotZones.push(hbx, hys[i], hbw, hbh, acts[i]);
+        }
+    },
+
+    // 设置界面：逐行列出，点一行就切到下一个取值
+    drawSettings(ctx, W) {
+        hotZones = [];
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = FG;
+        ctx.font = '28px sans-serif';
+        ctx.fillText('设置', W / 2, 74);
+
+        const srw = 300;
+        const srh = 60;
+        const srx = (W - srw) / 2;
+        const sry0 = 106;
+        const n = settings.count();
+        for (let i = 0; i < n; i++) {
+            const y = sry0 + i * srh;
+            ctx.fillStyle = BTN;
+            ctx.fillRect(srx, y + 3, srw, srh - 6);
+
+            ctx.fillStyle = FG;
+            ctx.font = '20px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(settings.ITEMS[i].label, srx + 18, y + srh / 2 + 7);
+
+            ctx.fillStyle = DIM;
+            ctx.textAlign = 'right';
+            ctx.fillText(settings.textOf(i), srx + srw - 18, y + srh / 2 + 7);
+
+            hotZones.push(srx, y, srw, srh, 'set' + i);
+        }
+
+        const obw = 120;
+        const obh = 46;
+        const obx = (W - obw) / 2;
+        const oby = sry0 + n * srh + 16;
+        ctx.fillStyle = BTN;
+        ctx.fillRect(obx, oby, obw, obh);
+        ctx.fillStyle = FG;
+        ctx.font = '22px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('返回', W / 2, oby + obh / 2 + vMid(22));
+        hotZones.push(obx, oby, obw, obh, 'home');
     },
 
     drawEdit(ctx, W) {
@@ -422,6 +526,18 @@ export default {
     },
 
     act(a) {
+        if (a === 'gotoPlot') { mode = PLOT_MODE; this.repaint(); return; }
+        if (a === 'gotoSettings') { mode = SETTINGS_MODE; this.repaint(); return; }
+        if (a === 'home') { mode = HOME_MODE; this.repaint(); return; }
+        // 设置项：动作名形如 set0 / set1 / set2 / set3
+        if (a.length === 4 && a.substring(0, 3) === 'set') {
+            const k = parseInt(a.substring(3), 10);
+            if (!isNaN(k)) {
+                settings.next(k);
+                this.repaint();
+            }
+            return;
+        }
         if (a === 'recenter') {
             if (viewCx !== 0 || viewCy !== 0) {
                 viewCx = 0;

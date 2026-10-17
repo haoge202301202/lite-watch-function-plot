@@ -162,7 +162,7 @@ function drawTicks(ctx, W, H, v) {
  * 遇到 NaN/Infinity（定义域外）或相邻点竖直跳变（1/x、tan 的渐近线）时断开路径，
  * 避免出现横贯画布的假竖线。
  */
-function drawCurve(ctx, ast, color, W, H, v) {
+function drawCurve(ctx, ast, color, W, H, v, lw) {
     const kx = W / (v.xmax - v.xmin);
     const steps = W > 360 ? 360 : W;
     const dx = (v.xmax - v.xmin) / steps;
@@ -172,9 +172,9 @@ function drawCurve(ctx, ast, color, W, H, v) {
     const loLimit = OY + H + 1;
 
     ctx.strokeStyle = color;
-    // 3px：Lite canvas 基本不做抗锯齿，2px 的斜线台阶感很明显，
-    // 加粗一档能把毛边盖住；坐标轴保持 2px，层级仍然分得开。
-    ctx.lineWidth = 3;
+    // 线宽来自设置（默认 3px）。Lite canvas 基本不做抗锯齿，
+    // 2px 的斜线台阶感很明显，3px 能把毛边盖住；坐标轴固定 2px，层级仍分得开。
+    ctx.lineWidth = (typeof lw === 'number' && lw > 0) ? lw : 3;
     ctx.beginPath();
 
     let pen = false;
@@ -291,9 +291,11 @@ function putLabel(ctx, text, px, py, color, W, H, placed, orders) {
  * 所以：点按优先级绘制，让顶点压在最上层；文字先比间距再比包围盒，
  * 距离过近或位置冲突就不再重复书写，避免出现「最(0(0)0)」这种重叠。
  */
-function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly) {
+function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly, set) {
     // placed 由调用方传入时可在多条函数之间共享，实现跨曲线的标注避让
     if (!placed) { placed = []; }
+    const st = set || {};
+    const dotR = (typeof st.dotSize === 'number' && st.dotSize > 0) ? st.dotSize : 3;
     // pal 允许换成曲线自身的颜色；不传则用统一的顶点/交点配色
     const cV = (pal && pal.vertex) ? pal.vertex : VERTEX_C;
     const cR = (pal && pal.root) ? pal.root : ROOT_C;
@@ -312,7 +314,7 @@ function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly) {
     // 对称轴 x = 顶点横坐标，淡色虚线，贯通整个绘图区。
     // 只在「完整标注」时画（单条模式 / 全部模式且 ≤ 2 条）：
     // 多条曲线各画一条对称轴会把画面切成网格，反而看不清曲线本身。
-    if (!vertexOnly && vx >= v.xmin && vx <= v.xmax) {
+    if (!vertexOnly && st.showAxis === 1 && vx >= v.xmin && vx <= v.xmax) {
         const ax = sxOf(vx, W, v);
         ctx.strokeStyle = SYM_C;
         ctx.lineWidth = 1;
@@ -332,7 +334,7 @@ function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly) {
         ypx = sxOf(0, W, v);
         ypy = syOf(cy, H, v);
         showY = true;
-        markPoint(ctx, ypx, ypy, cY, 3);
+        markPoint(ctx, ypx, ypy, cY, dotR);
     }
 
     const rn = quad.roots.length;
@@ -344,11 +346,11 @@ function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly) {
         const px = sxOf(rx, W, v);
         const py = syOf(0, H, v);
         rp.push([px, py]);
-        markPoint(ctx, px, py, cR, 3);
+        markPoint(ctx, px, py, cR, dotR);
     }
 
     if (showVertex) {
-        markPoint(ctx, vpx, vpy, cV, 4);
+        markPoint(ctx, vpx, vpy, cV, dotR + 1);
     }
 
     // 文字：顶点优先，其后交点和截距
@@ -431,7 +433,7 @@ export default {
     /**
      * 全量重绘。funcs 为曲线记录数组，curIdx 指定要高亮特殊点的那一条。
      */
-    draw: function (ctx, W, H, funcs, curIdx, ox, oy, half, cx, cy, markAll) {
+    draw: function (ctx, W, H, funcs, curIdx, ox, oy, half, cx, cy, markAll, opts) {
         // 尺寸必须是有限正数，否则后续所有坐标都会是 NaN，
         // canvas 会抛 TypeError: wrong type of argument
         if (typeof W !== 'number' || typeof H !== 'number' || !isFinite(W) || !isFinite(H) || W <= 0 || H <= 0) {
@@ -439,6 +441,15 @@ export default {
         }
         OX = (typeof ox === 'number' && isFinite(ox)) ? ox : 0;
         OY = (typeof oy === 'number' && isFinite(oy)) ? oy : 0;
+        // 外观设置（曲线粗细 / 交点开关 / 点标记大小 / 对称轴）；不传则沿用默认外观
+        const o = opts || {};
+        const lw = (typeof o.width === 'number' && o.width > 0) ? o.width : 3;
+        const wantRoots = (o.showRoots !== 0);
+        const dotSize = (typeof o.dotSize === 'number' && o.dotSize > 0) ? o.dotSize : 3;
+        // showAxis 默认 1：不传 opts 时要保持「对称轴照画」的既有行为，
+        // 只有设置里明确选成 0（隐藏）才关掉。
+        const dotSet = { dotSize: dotSize, showAxis: (o.showAxis === 0) ? 0 : 1 };
+
         const v = makeView(W, H, half, cx, cy);
         clear(ctx, W, H);
         drawGrid(ctx, W, H, v);
@@ -447,7 +458,7 @@ export default {
         for (let i = 0; i < funcs.length; i++) {
             const f = funcs[i];
             if (f && f.ast) {
-                drawCurve(ctx, f.ast, f.color, W, H, v);
+                drawCurve(ctx, f.ast, f.color, W, H, v, lw);
             }
         }
         // 标注共用一个 placed 表，多条函数之间也会互相避让
@@ -458,18 +469,18 @@ export default {
             //   <= 2 条 —— 画面还有余量，交点/截距也标出来，信息更全；
             //   >= 3 条 —— 只标顶点，因为多条曲线的交点必然糊成一片。
             // 无论哪种情况，putLabel 的避让表都会兜底：位置太挤就只留点、不写字。
-            const withRoots = funcs.length <= 2;
+            const withRoots = (funcs.length <= 2) && wantRoots;
             for (let i = 0; i < funcs.length; i++) {
                 const af = funcs[i];
                 if (af && af.quad) {
                     drawQuadPoints(ctx, af.quad, W, H, v, placed,
-                        { vertex: af.color, root: ROOT_C, yint: YINT_C }, !withRoots);
+                        { vertex: af.color, root: ROOT_C, yint: YINT_C }, !withRoots, dotSet);
                 }
             }
         } else if (curIdx >= 0 && curIdx < funcs.length) {
             const cf = funcs[curIdx];
             if (cf && cf.quad) {
-                drawQuadPoints(ctx, cf.quad, W, H, v, placed, null, false);
+                drawQuadPoints(ctx, cf.quad, W, H, v, placed, null, !wantRoots, dotSet);
             }
         }
     }
