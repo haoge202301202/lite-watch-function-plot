@@ -102,7 +102,7 @@ export default {
     // 四角到圆心距离 = sqrt((s/2)^2 + (233 - oy)^2)，466 屏上 s=292、oy=58 时约 227.9。
     side() {
         let s = this.cw - 60;
-        const lim = this.ch - 174;
+        const lim = this.ch - 178;
         if (s > lim) { s = lim; }
         if (s > 300) { s = 300; }
         if (s < 120) { s = 120; }
@@ -143,7 +143,7 @@ export default {
     drawPlot(ctx, W) {
         const s = this.side();
         const ox = Math.floor((W - s) / 2);
-        const oy = 58;
+        const oy = 66;
         const it = store.curItem();
 
         // 顶部标题带上「序号/总数」：切换曲线时数字变化，是 prev / next 生效的直接反馈
@@ -158,7 +158,7 @@ export default {
         ctx.font = '20px sans-serif';
         ctx.fillStyle = it ? FG : DIM;
         ctx.textAlign = 'center';
-        ctx.fillText(head, W / 2, 44);
+        ctx.fillText(head, W / 2, 42);
 
         // 二次函数特殊点：惰性计算（store 不依赖 poly）
         if (it && !it.quad) {

@@ -169,7 +169,9 @@ function drawCurve(ctx, ast, color, W, H, v) {
     const loLimit = OY + H + 1;
 
     ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
+    // 3px：Lite canvas 基本不做抗锯齿，2px 的斜线台阶感很明显，
+    // 加粗一档能把毛边盖住；坐标轴保持 2px，层级仍然分得开。
+    ctx.lineWidth = 3;
     ctx.beginPath();
 
     let pen = false;
