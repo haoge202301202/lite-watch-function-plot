@@ -71,8 +71,6 @@ const FONT_MID = -24 * 0.35;
 // 滑动平移相关：DRAG_MIN 是判定"拖动"而非"点击"的累计位移阈值（像素），
 // 低于它的抖动一律当点击处理，否则按按钮时手指微动就会把视图带跑。
 const DRAG_MIN = 8;
-// 拖动中的重绘节流（毫秒）：每次重绘都要重算全部曲线，轻手表堆只有 64KB，不能跟着手指逐帧画。
-const PAN_REPAINT_MS = 90;
 // 平移上限（世界单位）：防止滑太远之后彻底迷路。
 const PAN_LIMIT = 160;
 const CALLS = ['sin', 'cos', 'tan', 'ln', 'lg', 'log2',
@@ -105,7 +103,6 @@ let dragLastX = 0;
 let dragLastY = 0;
 let dragging = false;
 let suppressClick = false;
-let lastPanAt = 0;
 let startX = 0;
 let startY = 0;
 // 防抖：同一次点击会先派发 touchend、再派发 click，
@@ -598,12 +595,11 @@ export default {
         const k = 2 * ZOOMS[zoomIdx] / s;
         viewCx = clampPan(viewCx - dx * k);
         viewCy = clampPan(viewCy + dy * k);
-        // 拖动中限频重绘：每次重绘都要重算全部曲线，跟不上手指的采样率
-        const t = nowMs();
-        if (t - lastPanAt >= PAN_REPAINT_MS) {
-            lastPanAt = t;
-            this.repaint();
-        }
+        // 关键：touchmove 期间**一次都不重绘**。
+        // touchmove 是所有事件里唯一高频触发的（手指一动就是几十上百次），
+        // 而每次重绘都要清屏 + 重算网格/坐标轴/全部曲线/标注。之前在这里限流 90ms 重绘
+        // （约每秒 11 次整屏重绘），真机上平移必崩。现在这里只做纯算术累加，
+        // 视图真正的重绘放到 onTE —— 一次手势只画一帧。
     },
 
     onTE(e) {
