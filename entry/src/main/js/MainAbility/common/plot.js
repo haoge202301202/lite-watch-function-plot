@@ -111,12 +111,14 @@ function drawGrid(ctx, W, H, v, step) {
     ctx.lineWidth = 1;
     ctx.beginPath();
     let guard = 0;
+    let seg = 0;
     let x = Math.ceil(v.xmin / step) * step;
     while (x <= v.xmax + 1e-9 && guard < 60) {
         guard++;
         const px = sxOf(x, W, v);
         ctx.moveTo(px, OY);
         ctx.lineTo(px, OY + H);
+        seg++;
         x += step;
     }
     guard = 0;
@@ -126,26 +128,36 @@ function drawGrid(ctx, W, H, v, step) {
         const py = syOf(y, H, v);
         ctx.moveTo(OX, py);
         ctx.lineTo(OX + W, py);
+        seg++;
         y += step;
     }
-    ctx.stroke();
+    // 空路径不要 stroke：Lite 的 canvas 对「beginPath 之后没有任何线段就 stroke」
+    // 没有明确行为约定，真机上疑似会把原生路径留在异常状态，下一次绘制才炸。
+    if (seg > 0) { ctx.stroke(); }
+    // 收尾：显式把路径置空。真机上怀疑上一帧的路径对象会被原生侧留着，
+    // 下一次绘制（哪怕是 fillRect）才炸 —— 每次画完路径都 beginPath 一次最省心。
+    ctx.beginPath();
 }
 
 function drawAxes(ctx, W, H, v) {
     ctx.strokeStyle = AXIS;
     ctx.lineWidth = 2;
     ctx.beginPath();
+    let seg = 0;
     if (v.ymin <= 0 && v.ymax >= 0) {
         const py = syOf(0, H, v);
         ctx.moveTo(OX, py);
         ctx.lineTo(OX + W, py);
+        seg++;
     }
     if (v.xmin <= 0 && v.xmax >= 0) {
         const px = sxOf(0, W, v);
         ctx.moveTo(px, OY);
         ctx.lineTo(px, OY + H);
+        seg++;
     }
-    ctx.stroke();
+    if (seg > 0) { ctx.stroke(); }
+    ctx.beginPath();
 }
 
 /**
@@ -243,6 +255,7 @@ function drawCurve(ctx, evalFn, color, W, H, v, lw, sampleSteps) {
     ctx.beginPath();
 
     let pen = false;
+    let drew = false;
     let lastPy = 0;
 
     for (let i = 0; i <= steps; i++) {
@@ -261,9 +274,13 @@ function drawCurve(ctx, evalFn, color, W, H, v, lw, sampleSteps) {
             ctx.moveTo(px, py);
             pen = true;
         }
+        drew = true;
         lastPy = py;
     }
-    ctx.stroke();
+    // 整条曲线都在视野之外（例如 y = x^2 + 100 放在 ±8 视野里）时路径是空的，
+    // 这时绝不能 stroke —— 空路径 stroke 在 Lite canvas 上没有行为约定。
+    if (drew) { ctx.stroke(); }
+    ctx.beginPath();
 }
 
 /**
@@ -275,19 +292,22 @@ function dashedSegments(ctx, x1, y1, x2, y2, dash, gap) {
     const dx = x2 - x1;
     const dy = y2 - y1;
     const len = Math.sqrt(dx * dx + dy * dy);
-    if (!(len > 0) || !isFinite(len)) { return; }
+    if (!(len > 0) || !isFinite(len)) { return 0; }
     const ux = dx / len;
     const uy = dy / len;
     const step = dash + gap;
     let t = 0;
     let guard = 0;
+    let n = 0;
     while (t < len && guard < 400) {
         guard++;
         const t2 = (t + dash < len) ? (t + dash) : len;
         ctx.moveTo(x1 + ux * t, y1 + uy * t);
         ctx.lineTo(x1 + ux * t2, y1 + uy * t2);
+        n++;
         t += step;
     }
+    return n;
 }
 
 // 只有条目缺少编译闭包时才走这里（自测的手工构造），正常路径不会用到。
@@ -421,8 +441,8 @@ function drawQuadPoints(ctx, quad, W, H, v, placed, vertexOnly, set) {
         ctx.beginPath();
         // 段长从 6px 加大到 16px：304px 的竖线从 28 段降到 11 段，
         // 单条对称轴的调用数从约 58 次降到约 24 次。仍然是虚线，远看几乎无差别。
-        dashedSegments(ctx, ax, OY, ax, OY + H, 16, 12);
-        ctx.stroke();
+        if (dashedSegments(ctx, ax, OY, ax, OY + H, 16, 12) > 0) { ctx.stroke(); }
+        ctx.beginPath();
     }
 
     const showVertex = inView(vx, vy);
@@ -562,7 +582,8 @@ export default {
         // 网格与刻度共用同一个步长。早先两处各算各的（网格 target=2~6、刻度 target=1），
         // 于是网格线和刻度数字永远对不上，而且刻度 target=1 意味着「一个区间都拆不出来」——
         // 数字全部消失。现在只算一次：最多 3 个区间（含端点约 4 条线、3~4 个数字）。
-        const axisMaxInt = (q >= 2) ? 10 : 6;
+        // 区间上限：流畅 4 / 精细 8。一屏 3~4 个刻度数字就够读，多了反而糊。
+        const axisMaxInt = (q >= 2) ? 8 : 4;
         const step = niceStep(v.xmax - v.xmin, axisMaxInt);
         let sampleSteps = (q >= 2) ? Math.floor(W / 4)
             : (q <= 0 ? Math.floor(W / 10) : Math.floor(W / 6));

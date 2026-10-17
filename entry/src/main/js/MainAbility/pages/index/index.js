@@ -158,6 +158,9 @@ let okFlag = true;
 // 差异不在调用次数，而在"复杂绘制发生在事件回调里"这件事本身。
 // 这里用 0 毫秒的一次性定时器把绘制挪出回调，不是轮询、也不会常驻。
 let deferTimer = null;
+// 延迟重绘的时长。0ms 会在 touch 事件处理窗口内触发，真机上必崩；
+// 48ms 跨出窗口，肉眼无感。
+const DEFER_MS = 48;
 
 function cancelDefer() {
     if (deferTimer !== null) {
@@ -289,16 +292,19 @@ export default {
         return Math.floor(s);
     },
 
-    // 绘图页的重绘推迟到当前事件回调返回之后执行。
-    // 实测规律：键盘页在点击回调里直接重绘从不崩，绘图页（路径 + 曲线 + 标注）
-    // 在触摸/点击回调里直接重绘就会崩 —— 差异不在调用次数，而在"复杂绘制发生在回调里"。
-    // 0ms 一次性定时器，不轮询、不常驻；onHide/onDestroy 会清掉。
+    // 只有**绘图页**的重绘走这条延迟路径（缩放 / 平移收尾 / 左右键换曲线 / 保存后回绘图）。
+    //
+    // 为什么延迟 48ms 而不是 0ms：真机上 0ms 的定时器会紧挨着 touch 事件处理完成的那一刻
+    // 触发，此时框架还没把这次触摸的画布刷新收尾，再往画布上画就会黑屏重启。
+    // 48ms 足够跨出这个窗口，肉眼也完全看不出延迟。
+    //
+    // 而「返 / 设置 / 取消 / 删除 / 函数页」这些**换界面**的按键必须直接画：
+    // 实测把它们也改成延迟之后，点「返」立刻黑屏（v1.19.0 回归），改回直接重绘即恢复。
     repaintDeferred() {
-        // 已经有一次重绘在排队：不再重排，让它照常执行。
-        // 重绘时读的全是模块级最新状态（mode / zoomIdx / viewCx…），
-        // 所以一次重绘就等价于「把此前所有请求合并」。连续点缩放时这一条直接把
-        // 重绘次数从「一次点击一次」压到「一帧一次」。
-        if (deferTimer !== null) { return; }
+        // 已经有一次重绘在排队：取消旧的、按最新状态重排一次。
+        // 重绘读的全是模块级最新状态（mode / zoomIdx / viewCx…），
+        // 所以一次重绘就等价于「把此前所有请求合并」。
+        cancelDefer();
         const self = this;
         deferTimer = setTimeout(function () {
             deferTimer = null;
@@ -309,7 +315,7 @@ export default {
             // 真机上若崩在某一步，这个清空语句根本执行不到，标记就留在屏幕上。
             const d = self.dbgText;
             if (d && d.indexOf('保存') === 0) { self.dbgText = ''; }
-        }, 0);
+        }, DEFER_MS);
     },
 
     repaint() {
@@ -411,6 +417,8 @@ export default {
 
         // 绘图区描边：把坐标系和页面背景分开。
         // 必须画在 plot.draw 之后 —— 它内部的 clear() 按 OX/OY 铺了整块底色，会盖掉先画的东西。
+        // 用四条 1px 的 fillRect 描边（不用 strokeRect：这里画在曲线路径之后，
+        // 真机上路径状态还没收拾干净时再来一个 stroke 类操作，风险不值得冒）。
         ctx.fillStyle = PANEL;
         ctx.fillRect(ox, oy, s, 1);
         ctx.fillRect(ox, oy + s - 1, s, 1);
@@ -772,14 +780,16 @@ export default {
             this.repaintDeferred();
             return;
         }
+        // 开始界面 / 设置界面都是「轻页面」（≈20~40 次 canvas 调用），在点击回调里直接画没问题；
+        // 绘图页和键盘页是「重页面」（≈50~75 次），必须走 repaintDeferred 挪出触摸窗口。
         if (a === 'gotoSettings') {
             mode = SETTINGS_MODE;
-            this.repaintDeferred();
+            this.repaint();
             return;
         }
         if (a === 'home') {
             mode = HOME_MODE;
-            this.repaintDeferred();
+            this.repaint();
             return;
         }
         // 设置项：动作名形如 set0 / set1 / set2 / set3
@@ -787,7 +797,7 @@ export default {
             const k = parseInt(a.substring(3), 10);
             if (!isNaN(k)) {
                 settings.next(k);
-                this.repaintDeferred();
+                this.repaint();
             }
             return;
         }
@@ -848,7 +858,7 @@ export default {
             this.repaintInput();
             return;
         }
-        // 函数页 / 主键盘页切换：键位整块变了，必须整页重绘，但同样走延迟
+        // 函数页 / 主键盘页切换：27 个键整块重画（≈56 次调用），同样挪出触摸窗口
         if (a === '函数') { fnPage = true; this.repaintDeferred(); return; }
         if (a === '返回') { fnPage = false; this.repaintDeferred(); return; }
 

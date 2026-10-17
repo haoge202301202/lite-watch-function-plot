@@ -769,6 +769,17 @@ function runLegacyGone() {
   const backKey = idxSrc.match(/if \(a === '\u9000'\) \{([\s\S]*?)\n        \}/);
   chk('退格键不再整页重绘', !!backKey && backKey[1].indexOf('repaintInput') >= 0 && backKey[1].indexOf('this.repaint()') < 0,
     backKey ? 'ok' : '未匹配到退格分支');
+  // 空路径 stroke：Lite canvas 对「beginPath 之后没有线段就 stroke」没有行为约定，
+  // 真机上疑似把原生路径留在异常状态、到下一次绘制才炸。所有 stroke 都必须有守卫。
+  const plotSrc2 = fs.readFileSync(path.join(JS, 'common', 'plot.js'), 'utf8');
+  const bareStroke = plotSrc2.split('\n').filter((ln) => ln.indexOf('ctx.stroke();') >= 0 && ln.indexOf('if (') < 0);
+  chk('plot.js 里没有裸的 ctx.stroke()（都被 if 守卫）', bareStroke.length === 0,
+    JSON.stringify(bareStroke.map((s2) => s2.trim())));
+  chk('drawGrid / drawAxes / 对称轴都做了空路径守卫',
+    plotSrc2.indexOf('if (seg > 0) { ctx.stroke(); }') >= 0 &&
+    (plotSrc2.split('if (seg > 0) { ctx.stroke(); }').length - 1) >= 2 &&
+    plotSrc2.indexOf('if (drew) { ctx.stroke(); }') >= 0 &&
+    plotSrc2.indexOf('if (dashedSegments(ctx, ax, OY, ax, OY + H, 16, 12) > 0) { ctx.stroke(); }') >= 0);
 }
 
 (async function main() {
