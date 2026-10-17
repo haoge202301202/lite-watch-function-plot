@@ -10,11 +10,11 @@
     background-color: #0B0F14;
 }
 
-/* 探针文字：铺满并居中，确保任何情况下都能看清 */
-.dbg {
+/* 仅在渲染异常时显示一行提示，正常时为空字符串不显示 */
+.err {
     width: 100%;
-    height: 100%;
-    font-size: 30px;
-    color: #FFD166;
+    height: 26px;
+    font-size: 15px;
+    color: #F07272;
     text-align: center;
 }

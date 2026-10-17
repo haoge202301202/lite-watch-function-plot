@@ -67,6 +67,44 @@ entry/src/main/
 顺带记两个 Lite CSS 的坑：`max-lines` 与 `line-height` 会被构建器判为
 "not a standard attribute name"，已从样式中移除，改用 JS 端按字符数截断。
 
+## ⚠ ACELite 页面保留方法名与事件模型（血泪教训）
+
+### 1. `render` 是保留方法名，绝对不能自定义
+
+页面里写 `render() { ... }` 会覆盖框架自身的渲染方法，导致 `this.render` 变成非函数，
+框架渲染流程一并失效 —— 表现为**整页不渲染，连 HML 里的 `<text>` 都不显示**，
+日志只有 `TypeError: Expected a function` 和 `JsEngine Crash 0xc0000005`。本工程改用 `repaint()`。
+
+> 排查时先后误判为「组件太多」「路由失败」「JS 堆不够」，全错。真正定位靠 DevEco 调试器断在
+> `this.render()` 时看到的 `exception = TypeError: Expected a function`。
+
+### 2. 预览器：拖动 = touch，直接点击 = click
+
+鼠标**拖动**被映射成 `touchstart/touchmove/touchend`，**直接点击**只派发 `click`。
+canvas 自绘界面必须两条路径都处理：
+
+```html
+<stack on:touchstart="onTS" on:touchend="onTE" on:click="onClick">
+```
+
+`click` 在 Lite 里没有类型声明，坐标字段依次尝试 `globalX / clientX / x / pageX`。
+
+### 3. 事件只能绑一处，否则一次点击触发两次
+
+父节点与子节点同时绑定、或 `touchend` 与 `click` 都触发时，一次点击执行两遍，
+表现为**按一个键输入两个字符**。做法：只绑根 `stack` 一处，两条路径汇到同一命中入口，
+再用「键名 + 150ms 时间窗」防抖去重。命中判定用**按下点**，抬起点容易被拖动带偏。
+
+### 4. 页面用 onShow 驱动，别在 onInit 里发异步回调
+
+在 `onInit` 里发起 `Device.getInfo` / `store.load` 时 `$refs` 尚未就绪、
+回调时机也不稳定。改为 `onShow` 里**先渲染、再异步补数据**。
+
+### 5. `this.$refs` 在 onInit 阶段整个是 undefined
+
+必须 `if (!this.$refs) { return; }` 先判 `$refs` 本身；
+写 `if (!this.$refs.cv) ...` 会在 `$refs` 为 undefined 时抛 TypeError。
+
 ## ⚠ JS 堆只有 64KB（真正的崩溃原因）
 
 `previewer.log` 里能直接看到 OOM 现场：

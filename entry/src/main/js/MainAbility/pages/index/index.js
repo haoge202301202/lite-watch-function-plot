@@ -15,11 +15,11 @@ const HINT = '点 + 添加函数';
 const CALLS = ['sin', 'cos', 'tan', 'ln', 'lg', 'log2',
     'asin', 'acos', 'atan', 'sqrt', 'abs', 'exp'];
 
-// 页面是单例、模块只加载一次，状态放模块级变量：
-// 既避开「this 只能写 data 已声明字段」的限制，也避免 data 每次变化都做序列化。
-const PLOT = 0;
-const EDIT = 1;
-let mode = PLOT;
+// 状态放模块级变量：既避开「this 只能写 data 已声明字段」的限制，
+// 也避免 data 变化触发序列化。
+const PLOT_MODE = 0;
+const EDIT_MODE = 1;
+let mode = PLOT_MODE;
 let hotZones = [];
 let editText = '';
 let editMsg = '';
@@ -27,6 +27,25 @@ let editIdx = -1;
 let fnPage = false;
 let startX = 0;
 let startY = 0;
+// 防抖：同一次点击会先派发 touchend、再派发 click，
+// 用「键名 + 时间窗」去重，避免一次点击输入两个字符。
+let lastKey = '';
+let lastAt = 0;
+
+function nowMs() {
+    return (typeof Date.now === 'function') ? Date.now() : new Date().getTime();
+}
+
+// 命中查找（模块级，操作模块级 hotZones）
+function findHot(gx, gy) {
+    for (let i = 0; i + 4 < hotZones.length; i += 5) {
+        if (gx >= hotZones[i] && gx <= hotZones[i] + hotZones[i + 2] &&
+            gy >= hotZones[i + 1] && gy <= hotZones[i + 1] + hotZones[i + 3]) {
+            return String(hotZones[i + 4]);
+        }
+    }
+    return null;
+}
 
 function clip(s, n) {
     if (!s) { return ''; }
@@ -37,18 +56,23 @@ export default {
     data: {
         cw: 454,
         ch: 454,
-        dbgText: 'boot'
+        dbgText: ''
     },
 
-    onInit() {
-        const self = this;
-        this.dbgText = 'onInit';
-        mode = PLOT;
-        hotZones = [];
-        editText = '';
+    /**
+     * 只用 onShow 驱动：先渲染，再异步补数据。
+     * 早期版本在 onInit 里发起 Device.getInfo / store.load，回调时机不稳定，
+     * 曾导致整页不渲染；改成 onShow 后与已验证可用的探针结构一致。
+     */
+    onShow() {
+        mode = PLOT_MODE;
         editMsg = '';
-        editIdx = -1;
-        fnPage = false;
+        this.repaint();
+        this.boot();
+    },
+
+    boot() {
+        const self = this;
         try {
             Device.getInfo({
                 success: function (info) {
@@ -56,32 +80,22 @@ export default {
                         self.cw = info.windowWidth;
                         self.ch = info.windowHeight || info.windowWidth;
                     }
-                    self.render();
+                    self.repaint();
                 },
                 fail: function () {
-                    self.render();
+                    self.repaint();
                 }
             });
         } catch (e) {
-            this.render();
+            // 拿不到设备信息就按默认尺寸画
         }
         try {
             store.load(function () {
-                self.render();
+                self.repaint();
             });
         } catch (e) {
-            // storage 不可用也要能画
+            // storage 不可用时用空列表
         }
-    },
-
-    onReady() {
-        this.dbgText = 'onReady';
-        this.render();
-    },
-
-    onShow() {
-        this.dbgText = 'onShow';
-        this.render();
     },
 
     // 绘图区边长：留出顶部标题与底部按钮
@@ -94,15 +108,14 @@ export default {
         return Math.floor(s);
     },
 
-    render() {
-        // onInit 阶段整个 $refs 还是 undefined，必须先判空
-        if (!this.$refs) {
-            this.dbgText = 'no refs';
-            return;
-        }
+    repaint() {
+        if (!this.$refs) { return; }
         /** @type {any} */
         const el = this.$refs.cv;
-        if (!el || !el.getContext) { return; }
+        if (!el || !el.getContext) {
+            this.dbgText = 'no canvas';
+            return;
+        }
         const ctx = el.getContext('2d');
         if (!ctx) {
             this.dbgText = 'no ctx';
@@ -110,31 +123,23 @@ export default {
         }
         const W = this.cw;
         const H = this.ch;
-        if (!(W > 0) || !(H > 0)) {
-            this.dbgText = 'bad size ' + W + ',' + H;
-            return;
-        }
-        this.dbgText = 'draw m' + mode + ' ' + W + 'x' + H;
+        if (!(W > 0) || !(H > 0)) { return; }
 
         ctx.fillStyle = BG;
         ctx.fillRect(0, 0, W, H);
 
         try {
-            if (mode === PLOT) {
-                this.renderPlot(ctx, W);
+            if (mode === PLOT_MODE) {
+                this.drawPlot(ctx, W);
             } else {
-                this.renderEdit(ctx, W);
+                this.drawEdit(ctx, W);
             }
         } catch (e) {
-            this.dbgText = 'ERR ' + e;
-            ctx.fillStyle = ERR;
-            ctx.font = '16px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('err: ' + e, W / 2, H / 2);
+            this.dbgText = 'err ' + e;
         }
     },
 
-    renderPlot(ctx, W) {
+    drawPlot(ctx, W) {
         const s = this.side();
         const ox = Math.floor((W - s) / 2);
         const oy = 54;
@@ -145,25 +150,29 @@ export default {
         ctx.textAlign = 'center';
         ctx.fillText(it ? clip(it.text, 18) : HINT, W / 2, 30);
 
-        // 惰性计算二次函数特殊点（store 不依赖 poly）
+        // 二次函数特殊点：惰性计算（store 不依赖 poly）
         if (it && !it.quad) {
-            const q = poly.quadInfo(poly.polyOf(it.ast));
-            if (q) {
-                it.quad = q;
-                it.pts = plot.describeQuad(q);
+            try {
+                const q = poly.quadInfo(poly.polyOf(it.ast));
+                if (q) {
+                    it.quad = q;
+                    it.pts = plot.describeQuad(q);
+                }
+            } catch (e2) {
+                it.quad = null;
             }
         }
 
         plot.draw(ctx, s, s, store.getList(), store.getCur(), ox, oy);
 
-        if (it) {
-            const pts = it.pts ? clip(it.pts, 24) : '非二次函数';
+        if (it && it.pts) {
             ctx.font = '16px sans-serif';
             ctx.fillStyle = DIM;
             ctx.textAlign = 'center';
-            ctx.fillText(pts, W / 2, oy + s + 26);
+            ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 26);
         }
 
+        // 底部按钮 + 热区
         hotZones = [];
         const bw = 76;
         const bh = 44;
@@ -184,7 +193,7 @@ export default {
         }
     },
 
-    renderEdit(ctx, W) {
+    drawEdit(ctx, W) {
         let txt = editText;
         let color = DIM;
         if (txt) {
@@ -208,7 +217,7 @@ export default {
                 if (String(hotZones[i]) === '取消') { hotZones[i] = '删除'; }
             }
         }
-        keypad.draw(ctx, W, H, hotZones);
+        keypad.draw(ctx, W, this.ch, hotZones);
     },
 
     onTS(e) {
@@ -225,66 +234,80 @@ export default {
             gx = e.globalX;
             gy = e.globalY;
         }
-        this.hitAt(gx, gy);
+        // 以按下点判定更稳（抬起点可能被拖动带偏）
+        this.dispatch(startX, startY);
     },
 
-    hitAt(gx, gy) {
-        for (let i = 0; i + 4 < hotZones.length; i += 5) {
-            if (gx >= hotZones[i] && gx <= hotZones[i] + hotZones[i + 2] &&
-                gy >= hotZones[i + 1] && gy <= hotZones[i + 1] + hotZones[i + 3]) {
-                this.act(String(hotZones[i + 4]));
-                return;
-            }
+    onClick(e) {
+        let gx = -1;
+        let gy = -1;
+        if (e) {
+            if (typeof e.globalX === 'number') { gx = e.globalX; gy = e.globalY; }
+            else if (typeof e.clientX === 'number') { gx = e.clientX; gy = e.clientY; }
+            else if (typeof e.x === 'number') { gx = e.x; gy = e.y; }
+            else if (typeof e.pageX === 'number') { gx = e.pageX; gy = e.pageY; }
         }
+        if (gx >= 0) { this.dispatch(gx, gy); }
+    },
+
+    // 统一命中入口：touchend 与 click 都会走到这里，靠防抖去重
+    dispatch(gx, gy) {
+        const lbl = findHot(gx, gy);
+        if (!lbl) { return; }
+        const t = nowMs();
+        if (lbl === lastKey && (t - lastAt) < 150) { return; }
+        lastKey = lbl;
+        lastAt = t;
+        this.act(lbl);
     },
 
     act(a) {
-        if (a === 'prev') { store.prev(); this.render(); return; }
-        if (a === 'next') { store.next(); this.render(); return; }
+        if (a === 'prev') { store.prev(); this.repaint(); return; }
+        if (a === 'next') { store.next(); this.repaint(); return; }
         if (a === 'add') {
-            mode = EDIT;
+            mode = EDIT_MODE;
             editText = '';
             editMsg = '';
             editIdx = -1;
             fnPage = false;
-            this.render();
+            this.repaint();
             return;
         }
         if (a === '确定') { this.save(); return; }
-        if (a === '取消') { mode = PLOT; editMsg = ''; this.render(); return; }
+        if (a === '取消') { mode = PLOT_MODE; editMsg = ''; this.repaint(); return; }
         if (a === '删除') {
             store.removeAt(editIdx);
-            mode = PLOT;
+            mode = PLOT_MODE;
             editMsg = '';
             editIdx = -1;
-            this.render();
+            this.repaint();
             return;
         }
         if (a === '退') {
             if (editText.length > 0) { editText = editText.substring(0, editText.length - 1); }
             editMsg = '';
-            this.render();
+            this.repaint();
             return;
         }
-        if (a === '清') { editText = ''; editMsg = ''; this.render(); return; }
-        if (a === '函数') { fnPage = true; this.render(); return; }
-        if (a === '返回') { fnPage = false; this.render(); return; }
+        if (a === '清') { editText = ''; editMsg = ''; this.repaint(); return; }
+        if (a === '函数') { fnPage = true; this.repaint(); return; }
+        if (a === '返回') { fnPage = false; this.repaint(); return; }
 
         const add = (CALLS.indexOf(a) >= 0) ? (a + '(') : a;
         if (editText.length + add.length > MAXLEN) { return; }
         editText = editText + add;
         editMsg = '';
-        this.render();
+        this.repaint();
     },
 
     save() {
         const r = store.check(editText);
-        if (!r.ok) { editMsg = r.msg; this.render(); return; }
+        if (!r.ok) { editMsg = r.msg; this.repaint(); return; }
         const res = (editIdx >= 0) ? store.update(editIdx, editText) : store.add(editText);
-        if (!res.ok) { editMsg = res.msg; this.render(); return; }
-        mode = PLOT;
+        if (!res.ok) { editMsg = res.msg; this.repaint(); return; }
+        mode = PLOT_MODE;
         editMsg = '';
         editIdx = -1;
-        this.render();
+        this.repaint();
     }
 };
