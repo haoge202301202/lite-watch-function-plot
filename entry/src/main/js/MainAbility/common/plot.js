@@ -19,6 +19,8 @@ const TICK_C = '#77879B';
 const VERTEX_C = '#FFD166';
 const ROOT_C = '#3DDC97';
 const YINT_C = '#F072C0';
+// 对称轴：比网格线亮一点、比坐标轴暗一点，做到"看得见但不抢戏"
+const SYM_C = '#33465C';
 
 // 绘图区域的左上角偏移：让坐标系可以画在页面中的任意矩形里，
 // 而不用 translate（Lite canvas 没有 translate）。
@@ -199,6 +201,30 @@ function drawCurve(ctx, ast, color, W, H, v) {
     ctx.stroke();
 }
 
+/**
+ * 往当前路径追加一条虚线。
+ * Lite 版 CanvasRenderingContext2D 没有 setLineDash / lineDashOffset，
+ * 只能把线拆成一段段短线段，由调用方统一 beginPath + stroke。
+ */
+function dashedSegments(ctx, x1, y1, x2, y2, dash, gap) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (!(len > 0) || !isFinite(len)) { return; }
+    const ux = dx / len;
+    const uy = dy / len;
+    const step = dash + gap;
+    let t = 0;
+    let guard = 0;
+    while (t < len && guard < 400) {
+        guard++;
+        const t2 = (t + dash < len) ? (t + dash) : len;
+        ctx.moveTo(x1 + ux * t, y1 + uy * t);
+        ctx.lineTo(x1 + ux * t2, y1 + uy * t2);
+        t += step;
+    }
+}
+
 function markPoint(ctx, px, py, color, r) {
     ctx.fillStyle = color;
     ctx.fillRect(px - r, py - r, r * 2 + 1, r * 2 + 1);
@@ -282,6 +308,19 @@ function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly) {
 
     const vx = quad.vertex.x;
     const vy = quad.vertex.y;
+
+    // 对称轴 x = 顶点横坐标，淡色虚线，贯通整个绘图区。
+    // 只在「完整标注」时画（单条模式 / 全部模式且 ≤ 2 条）：
+    // 多条曲线各画一条对称轴会把画面切成网格，反而看不清曲线本身。
+    if (!vertexOnly && vx >= v.xmin && vx <= v.xmax) {
+        const ax = sxOf(vx, W, v);
+        ctx.strokeStyle = SYM_C;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        dashedSegments(ctx, ax, OY, ax, OY + H, 6, 5);
+        ctx.stroke();
+    }
+
     const showVertex = inView(vx, vy);
     const vpx = showVertex ? sxOf(vx, W, v) : 0;
     const vpy = showVertex ? syOf(vy, H, v) : 0;

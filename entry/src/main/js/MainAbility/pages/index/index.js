@@ -235,18 +235,21 @@ export default {
         //   单条模式 —— 显示当前那条的完整特殊点（最值 / 交点 / 截距）；
         //   全部模式 —— 按「序号:(顶点x,顶点y)」把每条依次列出，非二次函数留「-」占位，
         //              这样即使同屏多条也能逐个核对坐标。
+        // 基线 oy+s+14、字号统一 14px：
+        //   与绘图区底边(oy+s)留 2~3px，与按钮行顶边(oy+s+22)留 5px。
+        // 之前是 16px / oy+s+18，字的下沿正好压在按钮上被盖住。
         if (single >= 0) {
             if (it && it.pts) {
-                ctx.font = '16px sans-serif';
+                ctx.font = '14px sans-serif';
                 ctx.fillStyle = DIM;
                 ctx.textAlign = 'center';
-                ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 18);
+                ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 14);
             }
         } else if (total > 0) {
             ctx.font = '14px sans-serif';
             ctx.fillStyle = DIM;
             ctx.textAlign = 'center';
-            ctx.fillText(clip(plot.describeAll(list), 32), W / 2, oy + s + 18);
+            ctx.fillText(clip(plot.describeAll(list), 32), W / 2, oy + s + 14);
         }
 
         hotZones = [];

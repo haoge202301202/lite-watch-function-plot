@@ -121,6 +121,20 @@ async function runLogic() {
       }
     };
   }
+  // 对称轴是"竖向短虚线"：连续一段 moveTo→lineTo 的 x 相同、y 差在 1~20px。
+  // 用这个特征把它和网格线/坐标轴的整条竖线（y 差 300+）、曲线的相邻采样点（x 差 1px）区分开。
+  function hasVerticalDash(ops) {
+    for (let i = 0; i + 1 < ops.length; i++) {
+      const a = ops[i], b = ops[i + 1];
+      if (a[0] === 'moveTo' && b[0] === 'lineTo' &&
+          Math.abs(a[1] - b[1]) < 0.01 &&
+          Math.abs(a[2] - b[2]) > 1 && Math.abs(a[2] - b[2]) < 20) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   const funcs = ['x^2-3x+2', '1/x', 'sin(x)', 'tan(x)', 'ln(x)', 'sqrt(x)', '-x^2+4'].map((s) => {
     const r = expr.parse(s);
     const it = { src: r.body, ast: r.ast, color: '#4FC3F7', quad: null };
@@ -233,6 +247,14 @@ async function runLogic() {
   const oneLabels = mOne.ops.filter((o) => o[0] === 'fillText').map((o) => o[1])
     .filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0);
   chk('单条模式只标 1 个顶点', oneLabels.length === 1, JSON.stringify(oneLabels));
+  chk('单条模式画出对称轴（竖向虚线）', hasVerticalDash(mOne.ops));
+  chk('≤2 条全部模式画出对称轴', hasVerticalDash(mTwo.ops));
+  chk('≥3 条全部模式不画对称轴', !hasVerticalDash(mMark.ops));
+
+  // 非二次函数不该有对称轴
+  const mNonQuad = makeCtx();
+  plot.draw(mNonQuad.ctx, 304, 304, [multi[2]], 0, 81, 66, 8, 0, 0, false);
+  chk('非二次函数不画对称轴', !hasVerticalDash(mNonQuad.ops));
 
   console.log('  逻辑断言通过 ' + pass + ' 项（失败 ' + fail + ' 项）');
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -349,7 +371,12 @@ function runGeom() {
   chk('绘图区已达 304 上限（较 v1.2 的 288 放大）', side === sideCap && sideCap >= 304, 'side=' + side + ' cap=' + sideCap);
   check('标题 18字符@20px', center(180), titleY - 16, 180, 21);
   check('绘图区 ' + side, center(side), oy, side, side);
-  check('摘要文字 20字符@16px', center(160), oy + side + ptsOff - 13, 160, 16);
+  check('摘要文字 24字符@14px', center(200), oy + side + ptsOff - 11, 200, 14);
+  // 摘要行与按钮行不能叠在一起（v1.6.0 曾因间距只剩 4px，字的下沿被按钮压住）
+  const btnTop = oy + side + 22;
+  const ptsBottom = oy + side + ptsOff + 4;
+  chk('摘要行与按钮行之间留有间隙', btnTop - ptsBottom >= 3,
+    '摘要底 ' + ptsBottom + ' vs 按钮顶 ' + btnTop);
   check('按钮行 3x' + bw, center(bw * 3 + gap * 2), oy + side + byOff, bw * 3 + gap * 2, bh);
 
   // 缩放键浮在绘图区左右上角（index.js 的 zbw / zbh / zby / zXs），同样要落在圆内
