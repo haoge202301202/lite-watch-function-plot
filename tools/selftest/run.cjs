@@ -39,7 +39,7 @@ async function runLogic() {
   // 写一个内存 stub 顶掉它（get 走 fail 分支 => 用默认值），这样设置逻辑也能断言。
   fs.writeFileSync(path.join(tmp, 'storage-stub.mjs'),
     'export default { get: function (o) { if (o && o.fail) { o.fail(); } }, set: function () {} };\n', 'utf8');
-  for (const n of ['expr', 'num', 'poly', 'plot', 'keypad', 'focus', 'settings', 'store']) {
+  for (const n of ['expr', 'num', 'poly', 'plot', 'keypad', 'settings', 'store']) {
     let c = fs.readFileSync(path.join(COMMON, n + '.js'), 'utf8');
     c = c.replace(/from '\.\/([a-z0-9]+)'/g, "from './$1.mjs'");
     c = c.replace(/from '@system\.storage'/g, "from './storage-stub.mjs'");
@@ -48,7 +48,6 @@ async function runLogic() {
     mods[n] = await import(pathToFileURL(f).href);
   }
   const expr = mods.expr.default, num = mods.num.default, poly = mods.poly.default, plot = mods.plot.default;
-  const focus = mods.focus.default;
   const settings = mods.settings.default;
   const store = mods.store.default;
   KEYPAD = mods.keypad.default;
@@ -94,16 +93,7 @@ async function runLogic() {
   chk('1/x 不识别为二次', quad('1/x') === null);
   chk('sin(x) 不识别为二次', quad('sin(x)') === null);
 
-  // 左右键焦点循环：全部(0) -> 第1条(1) -> ... -> 第n条(n) -> 全部(0)
-  chk('焦点 全部->第1条', focus.stepFocusPos(0, 3, 1) === 1);
-  chk('焦点 第1条->第2条', focus.stepFocusPos(1, 3, 1) === 2);
-  chk('焦点 第3条->全部', focus.stepFocusPos(3, 3, 1) === 0);
-  chk('焦点 全部->第3条(上一个)', focus.stepFocusPos(0, 3, -1) === 3);
-  chk('焦点 第1条->全部(上一个)', focus.stepFocusPos(1, 3, -1) === 0);
-  chk('焦点 n=0 恒为全部', focus.stepFocusPos(0, 0, 1) === 0 && focus.stepFocusPos(5, 0, -1) === 0);
-  chk('焦点 越界夹紧后绕回', focus.stepFocusPos(9, 3, 1) === 0, focus.stepFocusPos(9, 3, 1));
-  chk('焦点 负数夹紧', focus.stepFocusPos(-2, 3, 1) === 1, focus.stepFocusPos(-2, 3, 1));
-  chk('焦点 单条基线 n=1', focus.stepFocusPos(0, 1, 1) === 1 && focus.stepFocusPos(1, 1, 1) === 0);
+  // 左右键的切换逻辑即 store.next / store.prev 的环形，放在第 1 节末尾统一断言。
 
   chk('fmt 抑制浮点误差', num.fmt(0.1 + 0.2) === '0.3');
   chk('fmt2 去掉多余 0', num.fmt2(1.5) === '1.5' && num.fmt2(3) === '3');
@@ -156,7 +146,9 @@ async function runLogic() {
   chk('plot 不产生 NaN 坐标', m.bad.length === 0, m.bad.slice(0, 4).join(','));
   const moves = m.ops.filter((o) => o[0] === 'moveTo').length;
   const lines = m.ops.filter((o) => o[0] === 'lineTo').length;
-  chk('生成折线路径', moves > 15 && lines > 150, 'moveTo=' + moves + ' lineTo=' + lines);
+  // 这里是 7 条曲线的压力测试，采样点会被「总量预算」摊薄到每条约 17 个，
+  // 所以阈值不能按单条曲线的密度来定；只要每条曲线都画出了连续折线就算通过。
+  chk('生成折线路径', moves >= 10 && lines > 60, 'moveTo=' + moves + ' lineTo=' + lines);
   chk('渐近线断点生效', moves > 12, 'moveTo=' + moves);
   const texts = m.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
   chk('标注含"最小"/"最大"', texts.some((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0));
@@ -204,7 +196,7 @@ async function runLogic() {
   plot.draw(mExtMax.ctx, 288, 288, funcs, 0, 89, 66, 48, 0, 0);
   chk('±48 档绘制无 NaN', mExtMax.bad.length === 0, mExtMax.bad.slice(0, 4).join(','));
 
-  // 全部同屏：每条二次函数都要标出顶点，非二次留占位
+  // 多条曲线：仍然全部画线，但特殊点只标「当前这一条」（全部同屏已移除）
   const COLORS3 = ['#4FC3F7', '#FFB74D', '#7BD389'];
   const multi = ['x^2-3x+2', '-x^2+4', '2x+1'].map((s, i) => {
     const r = expr.parse(s);
@@ -216,57 +208,58 @@ async function runLogic() {
   chk('构造 3 条（前 2 条是二次函数）',
     multi.length === 3 && !!multi[0].quad && !!multi[1].quad && !multi[2].quad);
 
-  const dAll = plot.describeAll(multi);
-  chk('describeAll 序号:顶点 格式', dAll.indexOf('1:(1.5,-0.25)') === 0, dAll);
-  chk('describeAll 非二次留占位', dAll.indexOf('3:-') >= 0, dAll);
-
+  // 3 条曲线一起画、只给第 1 条标点：画线不抛异常，标注只出现一份
   const mMark = makeCtx();
   let threwMark = null;
-  try { plot.draw(mMark.ctx, 304, 304, multi, 0, 81, 66, 8, 0, 0, true, { showAxis: 1 }); } catch (e) { threwMark = e.message; }
-  chk('全部模式绘制不抛异常且无 NaN', threwMark === null && mMark.bad.length === 0,
+  try { plot.draw(mMark.ctx, 304, 304, multi, 0, 81, 66, 8, 0, 0, { showAxis: 1 }); } catch (e) { threwMark = e.message; }
+  chk('3 条曲线同屏绘制不抛异常且无 NaN', threwMark === null && mMark.bad.length === 0,
     threwMark || mMark.bad.slice(0, 4).join(','));
   const markTexts = mMark.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
   const vLabels = markTexts.filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0);
-  chk('全部模式标出 2 个顶点坐标', vLabels.length === 2, JSON.stringify(vLabels));
-  chk('3 条曲线时只标顶点、不标交点',
-    markTexts.filter((t) => t.indexOf(',0)') > 0).length === 0,
+  chk('只标当前这一条的顶点（1 个，不再标注所有曲线）', vLabels.length === 1, JSON.stringify(vLabels));
+  chk('当前条是二次函数，额外标出 x 交点',
+    markTexts.filter((t) => t.indexOf(',0)') > 0).length > 0,
     JSON.stringify(markTexts.filter((t) => t.indexOf(',0)') > 0)));
+  chk('当前条额外标出 y 截距',
+    markTexts.filter((t) => t.indexOf('(0,') === 0).length > 0,
+    JSON.stringify(markTexts.filter((t) => t.indexOf('(0,') === 0)));
+  chk('当前条画出对称轴（竖向虚线）', hasVerticalDash(mMark.ops));
 
-  // 曲线 <= 2 条时才额外标交点/截距
+  // 同一次绘制里第 3 条是非二次函数：切到它就没有任何特殊点/对称轴
+  const mCur2 = makeCtx();
+  plot.draw(mCur2.ctx, 304, 304, multi, 2, 81, 66, 8, 0, 0, { showAxis: 1 });
+  const cur2Texts = mCur2.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
+  chk('切到非二次函数不标任何特殊点',
+    cur2Texts.filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0).length === 0,
+    JSON.stringify(cur2Texts));
+  chk('切到非二次函数不画对称轴', !hasVerticalDash(mCur2.ops));
+
+  // 切到第 2 条（-x^2+4）：标的是第 2 条自己的顶点，不是第 1 条的
   const twoQuads = multi.slice(0, 2);
   const mTwo = makeCtx();
-  plot.draw(mTwo.ctx, 304, 304, twoQuads, 0, 81, 66, 8, 0, 0, true, { showAxis: 1 });
+  plot.draw(mTwo.ctx, 304, 304, twoQuads, 1, 81, 66, 8, 0, 0, { showAxis: 1 });
   const twoTexts = mTwo.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
-  chk('2 条曲线标出 2 个顶点',
-    twoTexts.filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0).length === 2,
-    JSON.stringify(twoTexts.filter((t) => t.indexOf('最') === 0)));
-  chk('2 条曲线额外标出 x 交点',
-    twoTexts.filter((t) => t.indexOf(',0)') > 0).length > 0,
-    JSON.stringify(twoTexts.filter((t) => t.indexOf(',0)') > 0)));
-  chk('2 条曲线额外标出 y 截距',
-    twoTexts.filter((t) => t.indexOf('(0,') === 0).length > 0,
-    JSON.stringify(twoTexts.filter((t) => t.indexOf('(0,') === 0)));
+  const twoV = twoTexts.filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0);
+  chk('切到第 2 条只标它的 1 个顶点', twoV.length === 1, JSON.stringify(twoV));
+  chk('第 2 条顶点是最大值(0,4)', twoV[0] === '最大(0,4)', JSON.stringify(twoV));
+  chk('第 2 条画出对称轴', hasVerticalDash(mTwo.ops));
   chk('2 条曲线绘制无 NaN', mTwo.bad.length === 0, mTwo.bad.slice(0, 4).join(','));
 
-  // 单条模式（markAll=false）只标当前那条
   const mOne = makeCtx();
-  plot.draw(mOne.ctx, 304, 304, multi, 1, 81, 66, 8, 0, 0, false, { showAxis: 1 });
+  plot.draw(mOne.ctx, 304, 304, multi, 1, 81, 66, 8, 0, 0, { showAxis: 1 });
   const oneLabels = mOne.ops.filter((o) => o[0] === 'fillText').map((o) => o[1])
     .filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0);
-  chk('单条模式只标 1 个顶点', oneLabels.length === 1, JSON.stringify(oneLabels));
-  chk('单条模式画出对称轴（竖向虚线）', hasVerticalDash(mOne.ops));
-  chk('≤2 条全部模式画出对称轴', hasVerticalDash(mTwo.ops));
-  chk('≥3 条全部模式不画对称轴', !hasVerticalDash(mMark.ops));
+  chk('只突出当前这一条（1 个顶点标注）', oneLabels.length === 1, JSON.stringify(oneLabels));
 
   // 非二次函数不该有对称轴
   // 非二次函数：即使显式开启对称轴也不该画
   const mNonQuad = makeCtx();
-  plot.draw(mNonQuad.ctx, 304, 304, [multi[2]], 0, 81, 66, 8, 0, 0, false, { showAxis: 1 });
+  plot.draw(mNonQuad.ctx, 304, 304, [multi[2]], 0, 81, 66, 8, 0, 0, { showAxis: 1 });
   chk('非二次函数即使开启也不画对称轴', !hasVerticalDash(mNonQuad.ops));
 
   // 默认（不传 opts）应与设置默认一致：不画对称轴
   const mDefaultAxis = makeCtx();
-  plot.draw(mDefaultAxis.ctx, 304, 304, twoQuads, 0, 81, 66, 8, 0, 0, true);
+  plot.draw(mDefaultAxis.ctx, 304, 304, twoQuads, 0, 81, 66, 8, 0, 0);
   chk('不传 opts 时默认不画对称轴（与设置默认一致）', !hasVerticalDash(mDefaultAxis.ops));
 
   // ---- 设置项：默认值必须与改版前的外观一致，循环切换要能绕回 ----
@@ -320,7 +313,7 @@ async function runLogic() {
 
   // ---- 外观设置真正作用到绘制 ----
   const mApp = makeCtx();
-  plot.draw(mApp.ctx, 304, 304, multi, 1, 81, 66, 8, 0, 0, false,
+  plot.draw(mApp.ctx, 304, 304, multi, 1, 81, 66, 8, 0, 0,
     { width: 4, dotSize: 5, showAxis: 1, showRoots: 1 });
   const strokeW = mApp.ops.filter((o) => o[0] === 'stroke').map((o) => o[1]);
   chk('曲线线宽按设置生效(4px)', strokeW.indexOf(4) >= 0, JSON.stringify(strokeW));
@@ -329,7 +322,7 @@ async function runLogic() {
   chk('对称轴开启时画出虚线', hasVerticalDash(mApp.ops));
 
   const mOff = makeCtx();
-  plot.draw(mOff.ctx, 304, 304, multi, 1, 81, 66, 8, 0, 0, false, { showAxis: 0, showRoots: 0 });
+  plot.draw(mOff.ctx, 304, 304, multi, 1, 81, 66, 8, 0, 0, { showAxis: 0, showRoots: 0 });
   chk('设置关闭对称轴后不画', !hasVerticalDash(mOff.ops));
   const offTexts = mOff.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
   chk('设置隐藏交点后不标 x 交点',
@@ -340,13 +333,44 @@ async function runLogic() {
 
   // 画面等级影响网格密度与采样密度
   const mQ0 = makeCtx();
-  plot.draw(mQ0.ctx, 304, 304, multi, 0, 81, 66, 8, 0, 0, false, { quality: 0 });
+  plot.draw(mQ0.ctx, 304, 304, multi, 0, 81, 66, 8, 0, 0, { quality: 0 });
   const mQ2 = makeCtx();
-  plot.draw(mQ2.ctx, 304, 304, multi, 0, 81, 66, 8, 0, 0, false, { quality: 2 });
+  plot.draw(mQ2.ctx, 304, 304, multi, 0, 81, 66, 8, 0, 0, { quality: 2 });
   const mv0 = mQ0.ops.filter((o) => o[0] === 'moveTo').length;
   const mv2 = mQ2.ops.filter((o) => o[0] === 'moveTo').length;
   chk('画面等级「精细」比「流畅」绘制更多图元', mv2 > mv0, '流畅=' + mv0 + ' 精细=' + mv2);
   chk('画面等级切换不产生 NaN', mQ0.bad.length === 0 && mQ2.bad.length === 0);
+
+  // ---- canvas 调用预算 ----
+  // 真机上唯一能稳定复现的崩溃原因，就是「一次重绘」的 canvas 调用数太大：
+  // 引擎会在绘制管线里直接黑屏重来。这里把每个档位的实测调用数钉住，
+  // 以后无论谁改了采样、网格或标注，只要越界就立刻红。
+  const opsOf = (list, opt) => {
+    const mB = makeCtx();
+    plot.draw(mB.ctx, 304, 304, list, 0, 81, 66, 6, 0, 0, opt);
+    return mB.ops.length;
+  };
+  const mkItems = (srcs) => srcs.map((s2, i2) => {
+    const rr = expr.parse(s2);
+    const ii = { text: s2, src: rr.body, ast: rr.ast, color: COLORS3[i2 % 3], quad: null, pts: '' };
+    const qq2 = poly.quadInfo(poly.polyOf(rr.ast));
+    if (qq2) { ii.quad = qq2; ii.pts = plot.describeQuad(qq2); }
+    ii.ast = null;
+    return ii;
+  });
+  const heavy = mkItems(['sin(x)', 'x^2-1', '2x+1']);
+  const nDef3 = opsOf(heavy, { quality: 0 });
+  const nFine3 = opsOf(heavy, { quality: 2 });
+  const nAxis3 = opsOf(heavy, { quality: 0, showAxis: 1 });
+  chk('默认档 3 条曲线 <= 110 次调用', nDef3 <= 110, nDef3 + ' 次');
+  chk('精细档 3 条曲线 <= 145 次调用', nFine3 <= 145, nFine3 + ' 次');
+  chk('精细档 2 条曲线 <= 145 次调用',
+    opsOf(mkItems(['sin(x)', 'x^2-1']), { quality: 2 }) <= 145);
+  chk('对称轴开启 3 条曲线 <= 120 次调用', nAxis3 <= 120, nAxis3 + ' 次');
+  chk('单条曲线精细档 <= 125 次调用', opsOf(mkItems(['sin(x)']), { quality: 2 }) <= 125);
+  // 曲线越多调用越多是必然的，但增长必须被采样预算压住：3 条不能超过 1 条的 2 倍
+  const nDef1 = opsOf(mkItems(['sin(x)']), { quality: 0 });
+  chk('采样总量预算生效（3 条 / 1 条 < 2 倍）', nDef3 < nDef1 * 2 + 30, nDef1 + ' -> ' + nDef3);
 
   // 全程无定时器：源码里不该再出现 setInterval / setTimeout
   const idxSrcNoAnim = fs.readFileSync(path.join(ROOT, 'entry', 'src', 'main', 'js', 'MainAbility', 'pages', 'index', 'index.js'), 'utf8');
@@ -369,6 +393,22 @@ async function runLogic() {
   store.add('2x+1');
   chk('add 后共 2 条', store.count() === 2, store.count());
   chk('add 后 curItem 非空', store.curItem() !== null);
+
+  // 左右键 = store.next / store.prev（页面 shiftFocus 直接调这两个）。
+  // 必须是无「全部同屏」这一档的纯 0..n-1 环形：第末条 next 回到第 1 条，
+  // 第 1 条 prev 回到第末条。之前有一档 0=全部，这就是崩溃的入口，已整体删除。
+  store.setCur(0);
+  chk('环形 next 0->1', (store.next(), store.getCur() === 1), store.getCur());
+  chk('环形 next 1->0 (绕回，不再有「全部」档)', (store.next(), store.getCur() === 0), store.getCur());
+  chk('环形 prev 0->1 (反向绕回)', (store.prev(), store.getCur() === 1), store.getCur());
+  chk('环形 prev 1->0', (store.prev(), store.getCur() === 0), store.getCur());
+  store.clearAll();
+  store.add('x^2-1');
+  chk('单条时 next 仍在 0（n<2 页面直接返回不重绘）', (store.next(), store.getCur() === 0), store.getCur());
+  chk('单条时 prev 仍在 0', (store.prev(), store.getCur() === 0), store.getCur());
+  store.clearAll();
+  store.add('x^2-1');
+  store.add('2x+1');
   const badRes = store.add('abc');
   chk('add 非法表达式被拒绝', badRes.ok === false && store.count() === 2, JSON.stringify(badRes));
   store.clearAll();
@@ -683,6 +723,36 @@ function runStateCheck() {
   chk('页面 this 属性均已声明（' + files + ' 文件 / ' + refs + ' 处引用）', problems === 0, problems + ' 处未声明');
 }
 
+// ------------------------------------------------- 6. 「全部同屏」已彻底移除
+// 这一节存在的意义：全部同屏是真机上唯一能稳定复现黑屏（引擎级崩溃）的入口，
+// 已经按需求整体砍掉。代码里只要再冒出这些符号，就是这个功能在偷偷复活。
+function runLegacyGone() {
+  section('6. 「全部同屏」相关代码已彻底移除');
+  const JS = path.join(ROOT, 'entry', 'src', 'main', 'js', 'MainAbility');
+  const idxSrc = fs.readFileSync(path.join(JS, 'pages', 'index', 'index.js'), 'utf8');
+  const plotSrc = fs.readFileSync(path.join(JS, 'common', 'plot.js'), 'utf8');
+  const storeSrc = fs.readFileSync(path.join(JS, 'common', 'store.js'), 'utf8');
+
+  chk('common/focus.js 已删除', !fs.existsSync(path.join(JS, 'common', 'focus.js')));
+  chk('页面不再维护 focusPos', !/\bfocusPos\b/.test(idxSrc));
+  chk('页面不再 import focus 模块', !/from '\S*focus'/.test(idxSrc));
+  chk('页面不再计算 single / markAll', !/\bsingle\b/.test(idxSrc) && !/\bmarkAll\b/.test(idxSrc));
+  chk('plot 不再有 describeAll', !/describeAll/.test(plotSrc));
+  chk('plot.draw 不再收 markAll 形参', !/markAll/.test(plotSrc));
+  // 注释里还留着「全部曲线都会画成线条」这类说明，所以只查「全部」开头的字符串字面量
+  chk('页面标题不再有「全部 N 条」分支', !/['"]全部/.test(idxSrc));
+  // drawQuadPoints 的 pal 参数是给「每条曲线用自己的颜色标顶点」用的，随全部同屏一起删
+  chk('drawQuadPoints 不再收 pal 调色参数', !/\bpal\b/.test(plotSrc));
+  // 页面仍然只画一条曲线的特殊点：draw(ctx,W,H,list,curIdx,ox,oy,half,cx,cy,opts) = 11 个实参
+  const drawCall = idxSrc.match(/plot\.draw\(([\s\S]*?)\);/);
+  chk('plot.draw 调用存在', !!drawCall);
+  if (drawCall) {
+    const argc = drawCall[1].split(',').length;
+    chk('plot.draw 传 11 个实参（已去掉 markAll）', argc === 11, '实参 ' + argc + ' 个');
+  }
+  chk('store 的 next/prev 是纯环形（无 n+1 档）', /cur = \(cur \+ 1\) % list\.length/.test(storeSrc));
+}
+
 (async function main() {
   console.log('函数绘图 · 电脑端自测');
   console.log('工程根: ' + ROOT);
@@ -691,6 +761,7 @@ function runStateCheck() {
   runSyscap();
   runGeom();
   runStateCheck();
+  runLegacyGone();
   console.log('\n' + '='.repeat(60));
   console.log('断言通过 ' + pass + ' / ' + (pass + fail));
   if (fail > 0) {

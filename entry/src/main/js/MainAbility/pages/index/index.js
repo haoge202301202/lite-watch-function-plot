@@ -3,7 +3,6 @@ import store from '../../common/store';
 import poly from '../../common/poly';
 import plot from '../../common/plot';
 import keypad from '../../common/keypad';
-import focus from '../../common/focus';
 import settings from '../../common/settings';
 
 const BG = '#0B0F14';
@@ -95,9 +94,8 @@ let editIdx = -1;
 let fnPage = false;
 // 缩放状态与其它界面状态一样放模块级变量，不写 this（受限 ViewModel）
 let zoomIdx = ZOOM_BASE;
-// 左右键焦点：0 = 全部同屏，1..n = 只显示第 (focusPos-1) 条。
-// 左右键在这个环形序列里走动，所以「全部」和「单独某一条」都能看到。
-let focusPos = 0;
+// 左右键切换「显示哪一条曲线」的状态就是 store 里的 cur，
+// 不再单独维护一份焦点下标 —— 两份状态曾经不一致，是真机上一个隐蔽的坑。
 // 视图中心的世界坐标：滑动平移改这两个值；点绘图区空白处归位
 let viewCx = 0;
 let viewCy = 0;
@@ -305,8 +303,12 @@ export default {
             }
         } catch (e) {
             this.dbgText = 'err ' + e;
+            return;
         }
-
+        // 重绘成功才把诊断文字清掉。
+        // 这样「保存 3/5 算特殊点」这类阶段标记平时完全看不见（成功路径上必定被清空），
+        // 只有在真机上崩在某一阶段时，那一句才会留在屏幕上 —— 既是干净界面又是崩溃定位器。
+        if (this.dbgText !== '') { this.dbgText = ''; }
     },
 
     drawPlot(ctx, W) {
@@ -314,21 +316,17 @@ export default {
         const ox = Math.floor((W - s) / 2);
         const oy = 66;
 
-        // focusPos 决定画哪些：0 = 全部同屏，1..total = 只画那一条
+        // 全部曲线都会画成线条，但只给「当前这一条」(store 的 cur) 标特殊点。
+        // 左右键改的就是 cur，于是按键 = 换一条曲线看它的顶点/交点。
         const total = store.count();
-        if (focusPos > total) { focusPos = total; }
         const ci = store.getCur();
         const list = store.getList();
-        const single = focusPos > 0 ? (focusPos - 1) : -1;
-        const it = single >= 0 ? list[single] : store.curItem();
+        const it = (ci >= 0 && ci < list.length) ? list[ci] : null;
 
-        // 顶部标题就是左右键是否生效的直接反馈：
-        // 单条模式显示「表达式 + 序号/总数」，全部模式显示条数
+        // 顶部标题就是左右键是否生效的直接反馈：「表达式 + 序号/总数」
         let head = HINT;
         if (it) {
-            head = (single >= 0)
-                ? (clip(prettyExpr(it.text), 13) + '  ' + (single + 1) + '/' + total)
-                : ('全部 ' + total + ' 条');
+            head = clip(prettyExpr(it.text), 13) + '  ' + (ci + 1) + '/' + total;
         }
         // 基线 44（不是 30）：圆屏顶部收窄，20px 字形的上部若从 y=14 起会越出圆边，
         // 放到 y=28..49 这一段可用宽度才够放 18~20 个字符。
@@ -337,8 +335,7 @@ export default {
         ctx.textAlign = 'center';
         ctx.fillText(head, W / 2, 42);
 
-        // 二次函数特殊点：惰性计算（store 不依赖 poly）。
-        // 全部模式下每条都要标注，所以这里遍历所有条；quadDone 保证只算一次。
+        // 二次函数特殊点：惰性计算（store 不依赖 poly），每条只算一次（quadDone）。
         for (let qi = 0; qi < list.length; qi++) {
             const qf = list[qi];
             if (qf && qf.ast && !qf.quadDone) {
@@ -358,10 +355,9 @@ export default {
             }
         }
 
-        // 最后一个参数 markAll：全部模式下每条二次函数都标顶点，单条模式只标当前这条
+        // 传整份 list（背景曲线仍要画线），curIdx 指定给哪一条标特殊点
         const opt = settings.snapshot();
-        plot.draw(ctx, s, s, (single >= 0) ? [list[single]] : list,
-            (single >= 0) ? 0 : ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, single < 0, opt);
+        plot.draw(ctx, s, s, list, ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, opt);
 
         // 绘图区描边：把坐标系和页面背景分开。
         // 必须画在 plot.draw 之后 —— 它内部的 clear() 按 OX/OY 铺了整块底色，会盖掉先画的东西。
@@ -371,25 +367,15 @@ export default {
         ctx.fillRect(ox, oy, 1, s);
         ctx.fillRect(ox + s - 1, oy, 1, s);
 
-        // 底部摘要：
-        //   单条模式 —— 显示当前那条的完整特殊点（最值 / 交点 / 截距）；
-        //   全部模式 —— 按「序号:(顶点x,顶点y)」把每条依次列出，非二次函数留「-」占位，
-        //              这样即使同屏多条也能逐个核对坐标。
-        // 基线 oy+s+14、字号统一 14px：
+        // 底部摘要：当前这条曲线（若为二次函数）的完整特殊点（最值 / 交点 / 截距）。
+        // 基线 oy+s+14、字号 14px：
         //   与绘图区底边(oy+s)留 2~3px，与按钮行顶边(oy+s+22)留 5px。
         // 之前是 16px / oy+s+18，字的下沿正好压在按钮上被盖住。
-        if (single >= 0) {
-            if (it && it.pts) {
-                ctx.font = '14px HarmonyOS Sans';
-                ctx.fillStyle = DIM;
-                ctx.textAlign = 'center';
-                ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 14);
-            }
-        } else if (total > 0) {
+        if (it && it.pts) {
             ctx.font = '14px HarmonyOS Sans';
             ctx.fillStyle = DIM;
             ctx.textAlign = 'center';
-            ctx.fillText(clip(plot.describeAll(list), 32), W / 2, oy + s + 14);
+            ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 14);
         }
 
         hotZones.length = 0;
@@ -602,13 +588,13 @@ export default {
         keypad.draw(ctx, W, this.ch, hotZones);
     },
 
-    // 左右键：在「全部」与逐条之间循环。同时把选中项同步过去，
-    // 特殊点标注才会跟着变 —— 否则画面几乎没变化，按键看起来像没反应。
+    // 左右键：在当前曲线列表里循环切换「标特殊点的那一条」。
+    //
+    // 只有 1 条（或 0 条）时直接返回、不重绘 —— 切不出别的东西，
+    // 白白触发一次全量重绘反而是真机上最容易压垮绘制管线的多余动作。
     shiftFocus(dir) {
-        const n = store.count();
-        if (n === 0) { return; }
-        focusPos = focus.stepFocusPos(focusPos, n, dir);
-        if (focusPos > 0) { store.setCur(focusPos - 1); }
+        if (store.count() < 2) { return; }
+        if (dir > 0) { store.next(); } else { store.prev(); }
         this.repaintDeferred();
     },
 
@@ -698,7 +684,6 @@ export default {
             //   接着上次 —— 原样恢复（函数列表本来就写在 storage 里，跨会话也在）。
             if (settings.snapshot().keepLast !== 1) {
                 store.clearAll();
-                focusPos = 0;
                 viewCx = 0;
                 viewCy = 0;
                 zoomIdx = ZOOM_BASE;
@@ -812,7 +797,6 @@ export default {
         mode = PLOT_MODE;
         editMsg = '';
         editIdx = -1;
-        focusPos = store.getCur() + 1;
 
         this.dbgText = '保存 5/5 重绘';
         this.repaintDeferred();

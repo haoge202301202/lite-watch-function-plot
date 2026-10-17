@@ -340,15 +340,16 @@ function putLabel(ctx, text, px, py, color, W, H, placed, orders) {
  * 所以：点按优先级绘制，让顶点压在最上层；文字先比间距再比包围盒，
  * 距离过近或位置冲突就不再重复书写，避免出现「最(0(0)0)」这种重叠。
  */
-function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly, set) {
-    // placed 由调用方传入时可在多条函数之间共享，实现跨曲线的标注避让
+function drawQuadPoints(ctx, quad, W, H, v, placed, vertexOnly, set) {
+    // placed 是标注避让表；不复用也可以，传 null 时内部临时建一个
     if (!placed) { placed = []; }
     const st = set || {};
     const dotR = (typeof st.dotSize === 'number' && st.dotSize > 0) ? st.dotSize : 3;
-    // pal 允许换成曲线自身的颜色；不传则用统一的顶点/交点配色
-    const cV = (pal && pal.vertex) ? pal.vertex : VERTEX_C;
-    const cR = (pal && pal.root) ? pal.root : ROOT_C;
-    const cY = (pal && pal.yint) ? pal.yint : YINT_C;
+    // 顶点 / 交点 / 截距用统一的配色（不跟曲线颜色走：曲线颜色只用于曲线本身，
+    // 标注色高对比固定色，在圆屏小字号下更清楚）
+    const cV = VERTEX_C;
+    const cR = ROOT_C;
+    const cY = YINT_C;
     // 只有点几乎完全重合（< 6px）时才放弃重复标注；稍远一些就交给 putLabel
     // 的方位尝试去避让，避免把「数值不同但位置接近」的坐标误丢。
     const MIN_SEP = 6;
@@ -361,8 +362,8 @@ function drawQuadPoints(ctx, quad, W, H, v, placed, pal, vertexOnly, set) {
     const vy = quad.vertex.y;
 
     // 对称轴 x = 顶点横坐标，淡色虚线，贯通整个绘图区。
-    // 只在「完整标注」时画（单条模式 / 全部模式且 ≤ 2 条）：
-    // 多条曲线各画一条对称轴会把画面切成网格，反而看不清曲线本身。
+    // 只在「完整标注」时画（vertexOnly 为 false）：对称轴本身调用数不低
+    // （虚线要拆成十几段），默认关闭，由设置里的「二次函数对称轴」控制。
     if (!vertexOnly && st.showAxis === 1 && vx >= v.xmin && vx <= v.xmax) {
         const ax = sxOf(vx, W, v);
         ctx.strokeStyle = SYM_C;
@@ -463,33 +464,17 @@ function describeQuad(q) {
     return s;
 }
 
-/**
- * 全部模式的底部汇总：把每条二次函数的顶点坐标按「序号:(x,y)」紧凑列出。
- * 非二次函数留「-」占位，保证序号与曲线一一对应。
- */
-function describeAll(list) {
-    let s = '';
-    for (let i = 0; i < list.length; i++) {
-        const f = list[i];
-        if (!f) { continue; }
-        if (f.quad) {
-            s += (i + 1) + ':(' + num.fmt2(f.quad.vertex.x) + ',' + num.fmt2(f.quad.vertex.y) + ')  ';
-        } else {
-            s += (i + 1) + ':-  ';
-        }
-    }
-    return s;
-}
-
 export default {
     makeView: makeView,
     describeQuad: describeQuad,
-    describeAll: describeAll,
 
     /**
-     * 全量重绘。funcs 为曲线记录数组，curIdx 指定要高亮特殊点的那一条。
+     * 全量重绘。funcs 为曲线记录数组，curIdx 指定要标出特殊点的那一条。
+     *
+     * 只画「一条」曲线的特殊点：本应用已彻底移除「全部同屏」模式，
+     * funcs 里其余曲线只画线条、不标注，也就没有跨曲线标注避让的问题。
      */
-    draw: function (ctx, W, H, funcs, curIdx, ox, oy, half, cx, cy, markAll, opts) {
+    draw: function (ctx, W, H, funcs, curIdx, ox, oy, half, cx, cy, opts) {
         // 尺寸必须是有限正数，否则后续所有坐标都会是 NaN，
         // canvas 会抛 TypeError: wrong type of argument
         if (typeof W !== 'number' || typeof H !== 'number' || !isFinite(W) || !isFinite(H) || W <= 0 || H <= 0) {
@@ -526,8 +511,16 @@ export default {
         const q = (typeof o.quality === 'number') ? o.quality : 1;
         const gridTarget = (q >= 2) ? 6 : (q <= 0 ? 2 : 4);
         const tickTarget = (q >= 2) ? 3 : (q <= 0 ? 1 : 2);
-        const sampleSteps = (q >= 2) ? Math.floor(W / 4)
+        let sampleSteps = (q >= 2) ? Math.floor(W / 4)
             : (q <= 0 ? Math.floor(W / 10) : Math.floor(W / 6));
+        // 采样点上再压一道「总量预算」：每个采样点是一次求值 + 一次 lineTo，
+        // 是整次重绘的绝对大头。曲线多了就按条数摊薄，保证总采样数不超过 120，
+        // 否则「精细档 + 3 条曲线」会冲到 200 次以上调用 —— 那正是真机崩溃的量级。
+        // 单条曲线时这条分支不生效，流畅/标准/精细三档的手感原样保留。
+        if (funcs.length > 1) {
+            const cap = Math.floor(120 / funcs.length);
+            if (sampleSteps > cap) { sampleSteps = (cap < 10) ? 10 : cap; }
+        }
 
         drawGrid(ctx, W, H, v, gridTarget);
         drawAxes(ctx, W, H, v);
@@ -539,29 +532,15 @@ export default {
             const ev = (typeof f.fn === 'function') ? f.fn : fallbackEval(f.ast);
             if (ev) { drawCurve(ctx, ev, f.color, W, H, v, lw, sampleSteps); }
         }
-        // 标注共用一个 placed 表，多条函数之间也会互相避让。
-        // 复用模块级数组 + 每帧重置对象池，让这次重绘不再产生这些小对象。
+        // 只有一个标注避让表，复用模块级数组 + 每帧重置对象池，
+        // 让这次重绘不再产生这些小对象。
         resetBoxPool();
         const placed = PLACED_BUF;
         placed.length = 0;
-        if (markAll) {
-            // 全部同屏：每条二次函数都标出顶点（用各自曲线的颜色）。
-            // 交点是否一并标出取决于曲线条数：
-            //   <= 2 条 —— 画面还有余量，交点/截距也标出来，信息更全；
-            //   >= 3 条 —— 只标顶点，因为多条曲线的交点必然糊成一片。
-            // 无论哪种情况，putLabel 的避让表都会兜底：位置太挤就只留点、不写字。
-            const withRoots = (funcs.length <= 2) && wantRoots;
-            for (let i = 0; i < funcs.length; i++) {
-                const af = funcs[i];
-                if (af && af.quad) {
-                    drawQuadPoints(ctx, af.quad, W, H, v, placed,
-                        { vertex: af.color, root: ROOT_C, yint: YINT_C }, !withRoots, dotSet);
-                }
-            }
-        } else if (curIdx >= 0 && curIdx < funcs.length) {
+        if (curIdx >= 0 && curIdx < funcs.length) {
             const cf = funcs[curIdx];
             if (cf && cf.quad) {
-                drawQuadPoints(ctx, cf.quad, W, H, v, placed, null, !wantRoots, dotSet);
+                drawQuadPoints(ctx, cf.quad, W, H, v, placed, !wantRoots, dotSet);
             }
         }
     }
