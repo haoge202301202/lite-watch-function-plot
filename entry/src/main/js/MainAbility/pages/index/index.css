@@ -10,11 +10,13 @@
     background-color: #0B0F14;
 }
 
-/* 仅在渲染异常时显示一行提示，正常时为空字符串不显示 */
+/* 顶部一行状态文字：既用于渲染异常，也用于「平移中…」这类操作提示。
+   因为要兼顾两种语义，颜色取琥珀色而不是纯红。
+   注：不要加 line-height —— 构建器会判它为 "not a standard attribute name"。 */
 .err {
     width: 100%;
     height: 26px;
     font-size: 15px;
-    color: #F07272;
+    color: #E8B04B;
     text-align: center;
 }

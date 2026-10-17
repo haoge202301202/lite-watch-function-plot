@@ -328,20 +328,6 @@ export default {
         plot.draw(ctx, s, s, (single >= 0) ? [list[single]] : list,
             (single >= 0) ? 0 : ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, single < 0, opt);
 
-        // 正在平移时盖一个提示条：拖动过程中视图不再刷新，得让用户知道手势被识别了、
-        // 松开手指才会生效。这是 canvas 上的唯一"界面反馈"，不涉及定时器。
-        if (dragging) {
-            const tw = 132;
-            const th = 40;
-            const tx = (W - tw) / 2;
-            const ty = oy + s / 2 - th / 2;
-            card(ctx, tx, ty, tw, th, CARD);
-            ctx.fillStyle = FG;
-            ctx.font = '18px HarmonyOS Sans';
-            ctx.textAlign = 'center';
-            ctx.fillText('平移中…', W / 2, ty + th / 2 + vMid(18));
-        }
-
         // 绘图区描边：把坐标系和页面背景分开。
         // 必须画在 plot.draw 之后 —— 它内部的 clear() 按 OX/OY 铺了整块底色，会盖掉先画的东西。
         ctx.fillStyle = PANEL;
@@ -616,30 +602,30 @@ export default {
         // 手指在按钮上抖动几下再回到原处，累加值会超标从而把点击误判成拖动，按钮就静默失效了。
         const moved = Math.abs(e.globalX - startX) + Math.abs(e.globalY - startY);
         if (moved < DRAG_MIN) { return; }
-        const first = !dragging;
-        dragging = true;
+        if (!dragging) {
+            dragging = true;
+            // 视觉反馈走 HML 的 text 组件，不碰 canvas。
+            // 实测 touchmove 回调里只要发生 canvas 绘制，画好曲线后平移必崩 —— 一次也不行。
+            this.dbgText = '平移中… 松开手指生效';
+        }
         const s = this.side();
         if (!(s > 0)) { return; }
         // 手指右移 => 图像右移 => 视图中心左移；屏幕 y 向下而世界 y 向上，故 y 取反
         const k = 2 * ZOOMS[zoomIdx] / s;
         viewCx = clampPan(viewCx - dx * k);
         viewCy = clampPan(viewCy + dy * k);
-        // 关键：touchmove 期间**不做连续重绘**。
-        // touchmove 是所有事件里唯一高频触发的（手指一动就是几十上百次），
-        // 而每次重绘都要清屏 + 重算网格/坐标轴/全部曲线/标注，真机上撑不住。
-        // 这里只在「刚开始拖动」的那一下画一帧（画面会盖上"平移中"提示），
-        // 之后全程只做纯算术累加；松手时（onTE）再画一帧真实内容。
-        // 一次手势总共只有 2 次重绘。
-        if (first) {
-            this.repaint();
-        }
+        // touchmove 期间这里**一次 canvas 绘制都没有**，只做纯算术累加。
+        // 真机实测：只要在 touchmove 回调里画 canvas，画好曲线后平移必崩；
+        // 提示文字改走 HML 的 text 组件（上面的 dbgText），完全不碰 canvas。
+        // 视图真正的重绘只在 onTE（松手）发生一次。
     },
 
     onTE(e) {
         if (dragging) {
             dragging = false;
             suppressClick = true;   // 拖动过就不再当点击处理，避免误触按钮
-            this.repaint();         // 松手补画一次，确保停在准确位置
+            this.dbgText = '';      // 清掉「平移中…」提示
+            this.repaint();         // 整个手势里唯一的一次 canvas 绘制
             return;
         }
         // 以按下点判定更稳（抬起点可能被拖动带偏）
