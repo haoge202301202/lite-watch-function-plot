@@ -617,3 +617,7 @@ lineWidth / strokeStyle / stroke / beginPath / moveTo / lineTo / closePath / fon
 | 1.1.1 | 修复缩放键 `+`/`-` 文字基线偏移：缩放键曾用 `+9`、底部按钮用 `-24*0.35`，两者方向相反，符号整体下坠约 17px 掉到按钮边缘；现抽出 `FONT_MID` 常量两处共用 |
 | 1.1.0 | 新增视野缩放（±2 … ±24 共 8 档）；`plot.makeView/draw` 支持可配置视图半宽；缩放键几何纳入自测 |
 | 1.0.0 | 表达式解析、二次函数特殊点、多函数同屏绘图、canvas 自绘键盘 |
+
+## 许可证
+
+[MIT](LICENSE)
