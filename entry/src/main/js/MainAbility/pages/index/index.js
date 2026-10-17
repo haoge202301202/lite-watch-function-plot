@@ -330,7 +330,7 @@ export default {
         }
         // 基线 44（不是 30）：圆屏顶部收窄，20px 字形的上部若从 y=14 起会越出圆边，
         // 放到 y=28..49 这一段可用宽度才够放 18~20 个字符。
-        ctx.font = '20px sans-serif';
+        ctx.font = '20px HarmonyOS Sans';
         ctx.fillStyle = it ? FG : DIM;
         ctx.textAlign = 'center';
         ctx.fillText(head, W / 2, 42);
@@ -376,13 +376,13 @@ export default {
         // 之前是 16px / oy+s+18，字的下沿正好压在按钮上被盖住。
         if (single >= 0) {
             if (it && it.pts) {
-                ctx.font = '14px sans-serif';
+                ctx.font = '14px HarmonyOS Sans';
                 ctx.fillStyle = DIM;
                 ctx.textAlign = 'center';
                 ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 14);
             }
         } else if (total > 0) {
-            ctx.font = '14px sans-serif';
+            ctx.font = '14px HarmonyOS Sans';
             ctx.fillStyle = DIM;
             ctx.textAlign = 'center';
             ctx.fillText(clip(plot.describeAll(list), 32), W / 2, oy + s + 14);
@@ -399,7 +399,7 @@ export default {
 
         card(ctx, ox + 8, zby, zbw, zbh, CARD);
         ctx.fillStyle = FG;
-        ctx.font = '20px sans-serif';
+        ctx.font = '20px HarmonyOS Sans';
         ctx.textAlign = 'center';
         ctx.fillText('返', ox + 8 + zbw / 2, zby + zbh / 2 + vMid(20));
         hotZones.push(ox + 8, zby, zbw, zbh, 'home');
@@ -418,7 +418,7 @@ export default {
                 card(ctx, zXs[z], zby, zbw, zbh, CARD);
             }
             ctx.fillStyle = zDead[z] ? MUTED : FG;
-            ctx.font = '24px sans-serif';
+            ctx.font = '24px HarmonyOS Sans';
             ctx.textAlign = 'center';
             ctx.fillText(zLabels[z], zXs[z] + zbw / 2, zby + zbh / 2 + FONT_MID);
             hotZones.push(zXs[z], zby, zbw, zbh, zActs[z]);
@@ -426,7 +426,7 @@ export default {
 
         // 绘图区右下角标出当前视野半宽；已平移时换高亮色并加"已移"，提示视图偏离了原点
         const panned = (viewCx !== 0 || viewCy !== 0);
-        ctx.font = '14px sans-serif';
+        ctx.font = '14px HarmonyOS Sans';
         ctx.fillStyle = panned ? '#6BA6E8' : MUTED;
         ctx.textAlign = 'right';
         ctx.fillText(panned ? ('\u00b1' + ZOOMS[zoomIdx] + ' \u5df2\u79fb') : ('\u00b1' + ZOOMS[zoomIdx]),
@@ -446,7 +446,7 @@ export default {
             const x = bx + i * (bw + gap);
             card(ctx, x, by, bw, bh, (acts[i] === 'add') ? CARD_BLUE : CARD);
             ctx.fillStyle = FG;
-            ctx.font = '24px sans-serif';
+            ctx.font = '24px HarmonyOS Sans';
             ctx.textAlign = 'center';
             ctx.fillText(labels[i], x + bw / 2, by + bh / 2 + FONT_MID);
             hotZones.push(x, by, bw, bh, acts[i]);
@@ -478,11 +478,11 @@ export default {
 
         ctx.textAlign = 'center';
         ctx.fillStyle = FG;
-        ctx.font = '32px sans-serif';
+        ctx.font = '32px HarmonyOS Sans';
         ctx.fillText('函数绘图', W / 2, 96);
         // 副标题：一句话说清这是什么，顺便把标题区和按钮区隔开
         ctx.fillStyle = MUTED;
-        ctx.font = '15px sans-serif';
+        ctx.font = '15px HarmonyOS Sans';
         ctx.fillText('高中数学函数图像', W / 2, 124);
 
         // 变量名带 h 前缀，与 drawPlot 的 bw/bh 区分开（自测按名字正则提取几何参数）
@@ -495,7 +495,7 @@ export default {
         for (let i = 0; i < 2; i++) {
             card(ctx, hbx, hys[i], hbw, hbh, (i === 0) ? CARD_BLUE : CARD);
             ctx.fillStyle = FG;
-            ctx.font = '28px sans-serif';
+            ctx.font = '28px HarmonyOS Sans';
             ctx.textAlign = 'center';
             ctx.fillText(labels[i], W / 2, hys[i] + hbh / 2 + vMid(28));
             hotZones.push(hbx, hys[i], hbw, hbh, acts[i]);
@@ -508,7 +508,7 @@ export default {
         card(ctx, hbx, kby, hbw, kbh, CARD);
         const keepIdx = settings.indexOf('keepLast');
         ctx.fillStyle = DIM;
-        ctx.font = '19px sans-serif';
+        ctx.font = '19px HarmonyOS Sans';
         ctx.textAlign = 'left';
         ctx.fillText('进入绘图时', hbx + 16, kby + kbh / 2 + vMid(19));
         ctx.fillStyle = FG;
@@ -525,7 +525,7 @@ export default {
 
         ctx.textAlign = 'center';
         ctx.fillStyle = FG;
-        ctx.font = '28px sans-serif';
+        ctx.font = '28px HarmonyOS Sans';
         ctx.fillText('设置', W / 2, 70);
 
         // 7 项之后纵向很紧：行高压到 43、起始上提到 92，才装得下（末行底边 393，返回键 401..439）
@@ -539,7 +539,7 @@ export default {
             card(ctx, srx, y + 3, srw, srh - 6, CARD);
 
             ctx.fillStyle = FG;
-            ctx.font = '18px sans-serif';
+            ctx.font = '18px HarmonyOS Sans';
             ctx.textAlign = 'left';
             ctx.fillText(settings.ITEMS[i].label, srx + 16, y + srh / 2 + 6);
 
@@ -561,9 +561,9 @@ export default {
         const oby = sry0 + n * srh + 8;
         card(ctx, obx, oby, obw, obh, CARD);
         ctx.fillStyle = FG;
-        ctx.font = '22px sans-serif';
+        ctx.font = '22px HarmonyOS Sans';
         ctx.textAlign = 'center';
-        ctx.font = '20px sans-serif';
+        ctx.font = '20px HarmonyOS Sans';
         ctx.textAlign = 'center';
         ctx.fillText('返回', W / 2, oby + obh / 2 + vMid(20));
         hotZones.push(obx, oby, obw, obh, 'home');
@@ -584,7 +584,7 @@ export default {
         }
         // 超长时保留尾部而不是头部：用户刚敲的字符在后半段，截掉开头才看得见自己在打什么
         if (txt.length > 20) { txt = '\u2026' + txt.substring(txt.length - 19); }
-        ctx.font = '22px sans-serif';
+        ctx.font = '22px HarmonyOS Sans';
         ctx.fillStyle = color;
         ctx.textAlign = 'center';
         ctx.fillText(txt, W / 2, 72);

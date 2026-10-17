@@ -1,6 +1,20 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\kekek\\.ohos\\config\\default_f_GFC_UAbmxzuxl5WsvIX__rTvMryKYGXG3eKpfxQ6T00=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001A57437F4ACC47521777D6EC161106881604B90145BA5E66561539199124B96D5EC8F2DF4E84B6",
+          "profile": "C:\\Users\\kekek\\.ohos\\config\\default_f_GFC_UAbmxzuxl5WsvIX__rTvMryKYGXG3eKpfxQ6T00=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\kekek\\.ohos\\config\\default_f_GFC_UAbmxzuxl5WsvIX__rTvMryKYGXG3eKpfxQ6T00=.p12",
+          "storePassword": "0000001A7A6D44F54A0283C40D92F3B4ED9F59A10E08B76A0B9378323BFE5AA1C48D4667C864B993FBAE"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",

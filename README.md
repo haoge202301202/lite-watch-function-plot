@@ -137,6 +137,37 @@ entry/src/main/
         └── edit/      # 编辑页：canvas 键盘（组件数仅 3）
 ```
 
+## ⚠ canvas 的字体名必须写真实存在的族名，不能用 `sans-serif`（真机无字的根因）
+
+真机实测：**所有矩形、线条、坐标轴、按钮都正常，但一个字都不显示**。
+
+根因是 canvas 的 `font` 写成了 CSS 泛型名 `sans-serif`：
+
+```js
+ctx.font = '20px sans-serif';   // ❌ 真机上整段文字不渲染
+ctx.font = '20px HarmonyOS Sans'; // ✅
+```
+
+依据（SDK 自带 `previewer/common/bin/fontconfig_ohos.json`）—— 里面的 alias 只有这些：
+
+```
+HarmonyOS-Sans / HarmonyOS-Sans-Light / -Regular / -Medium / -Bold / -Condensed / -Digit
+serif  → Noto Serif
+monospace → Noto Sans Mono
+notdef
+HYQiHei L3（type:1，zh-Hans 的语言回退字体）
+```
+
+**`sans-serif` 出现次数为 0**，没有任何映射。而 canvas 的 `ctx.font` 不像 HML 的 CSS 那样
+有自动字体回退，名字查不到就直接什么都不画 —— 且**不报错、不抛异常**，
+所以 `try/catch` 和页面上的错误提示都看不到它。
+
+> 注意：官方 ArkUI.Lite 文档写的是「字体样式支持 sans-serif, serif, monospace」，
+> 与设备上的 fontconfig 实际配置不一致。**以设备配置为准**。
+
+排查这类"图形有、文字没有"的问题时，先用 `fillRect` 画几个标记确认绘制管线正常，
+再去怀疑字体名 —— 不要一上来就怀疑坐标、颜色或 z-order。
+
 ## ⚠ 轻手表的 `input` 组件不是输入框（改代码前必读）
 
 官方 ArkUI.Lite 文档里，`input` 是"交互式组件，包括单选框，多选框，按钮"，**`type` 只支持
@@ -472,7 +503,8 @@ lineWidth / strokeStyle / stroke / beginPath / moveTo / lineTo / closePath / fon
 
 | 版本 | 内容 |
 |---|---|
-| **1.14.1** | 交付前代码审查修复：①`stopAnim`/`stopWipe` 中断时不复位 → 页面隐藏再回来会看到画一半的曲线、遮一半的画面；②`wipeT` 注释与代码语义写反（0 才是全遮）；③入场动画期间标注已画而曲线未到，标注会"飞在白处"，改为 `upto<1` 时不画标注；④`settings.snapshot()` 改为按 id 取值，不再依赖硬编码下标；⑤补记产物体积与 64 KB 堆的实测风险 |
+| **1.14.2** | **修复真机全界面无字**：canvas 的 `font` 全部从泛型名 `sans-serif` 换成设备上真实存在的 `HarmonyOS Sans`（共 19 处）。设备 fontconfig 里根本没有 `sans-serif` 映射，而 canvas 不会自动回退，字体查不到就整段不渲染且不报错 |
+| 1.14.1 | 交付前代码审查修复：①`stopAnim`/`stopWipe` 中断时不复位 → 页面隐藏再回来会看到画一半的曲线、遮一半的画面；②`wipeT` 注释与代码语义写反（0 才是全遮）；③入场动画期间标注已画而曲线未到，标注会"飞在白处"，改为 `upto<1` 时不画标注；④`settings.snapshot()` 改为按 id 取值，不再依赖硬编码下标；⑤补记产物体积与 64 KB 堆的实测风险 |
 | 1.14.0 | 补全动画：界面切换加**擦除式转场**（背景色矩形从左往右撤走）。修复菜单底部开关**显示错项**——原先用 `count()-1` 取「保留上次函数」，加了动画/画面等级两项后它指到了最后一项「画面等级」，菜单显示成"标准"；改为 `settings.indexOf('keepLast')` 并加回归断言。设置页值文字与箭头拉开到 16px |
 | 1.13.0 | 新增**动画级别**（关闭 / 简洁 / 完整）与**画面等级**（流畅 / 标准 / 精细）两项设置；完整档带曲线从左往右的入场动画（7 帧 × 40ms，只改 progress 不额外分配）；按键有 140ms 高亮反馈；画面等级控制网格/刻度/采样密度。设置页扩到 7 行并重排，可点行右侧加 `>` 提示 |
 | 1.12.0 | 输入页重排为**计算器式布局**（÷ × - + 垂直成列、`^`/`x` 相邻、`退`/`清` 收到右上角、`√`/`π` 远离「确定」），末行三键加宽；输入区带 `y =` 前缀并改为**保留尾部**的截断。**修复键盘顶部越出圆屏**：页面传的 topY=60 让首行四角距圆心 251px（超出 233），而自测却用默认值 110 校验，测的是屏幕上不存在的布局 |

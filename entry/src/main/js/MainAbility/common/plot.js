@@ -125,7 +125,7 @@ function drawTicks(ctx, W, H, v, target) {
     const px0 = sxOf(0, W, v);
     const py0 = syOf(0, H, v);
     ctx.fillStyle = TICK_C;
-    ctx.font = '15px sans-serif';
+    ctx.font = '15px HarmonyOS Sans';
 
     ctx.textAlign = 'center';
     let guard = 0;
@@ -277,7 +277,7 @@ function putLabel(ctx, text, px, py, color, W, H, placed, orders) {
         if (!box) { continue; }
         if (overlapsAny(box, placed)) { continue; }
         placed.push(box);
-        ctx.font = fs + 'px sans-serif';
+        ctx.font = fs + 'px HarmonyOS Sans';
         ctx.fillStyle = color;
         ctx.textAlign = box.align;
         ctx.fillText(text, box.tx, box.ty);

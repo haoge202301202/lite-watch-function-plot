@@ -111,7 +111,7 @@ function draw(ctx, W, H, flat, highlight) {
         ctx.fillStyle = (highlight && label === highlight) ? C_HL : keyBg(label);
         ctx.fillRect(x, y, w, h);
         const fs = keyFont(label);
-        ctx.font = fs + 'px sans-serif';
+        ctx.font = fs + 'px HarmonyOS Sans';
         ctx.fillStyle = keyFg(label);
         ctx.textAlign = 'center';
         ctx.fillText(label, x + w / 2, y + h / 2 - fs * 0.35);
