@@ -207,6 +207,25 @@ async function runLogic() {
   const markTexts = mMark.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
   const vLabels = markTexts.filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0);
   chk('全部模式标出 2 个顶点坐标', vLabels.length === 2, JSON.stringify(vLabels));
+  chk('3 条曲线时只标顶点、不标交点',
+    markTexts.filter((t) => t.indexOf(',0)') > 0).length === 0,
+    JSON.stringify(markTexts.filter((t) => t.indexOf(',0)') > 0)));
+
+  // 曲线 <= 2 条时才额外标交点/截距
+  const twoQuads = multi.slice(0, 2);
+  const mTwo = makeCtx();
+  plot.draw(mTwo.ctx, 304, 304, twoQuads, 0, 81, 66, 8, 0, 0, true);
+  const twoTexts = mTwo.ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
+  chk('2 条曲线标出 2 个顶点',
+    twoTexts.filter((t) => t.indexOf('最小') === 0 || t.indexOf('最大') === 0).length === 2,
+    JSON.stringify(twoTexts.filter((t) => t.indexOf('最') === 0)));
+  chk('2 条曲线额外标出 x 交点',
+    twoTexts.filter((t) => t.indexOf(',0)') > 0).length > 0,
+    JSON.stringify(twoTexts.filter((t) => t.indexOf(',0)') > 0)));
+  chk('2 条曲线额外标出 y 截距',
+    twoTexts.filter((t) => t.indexOf('(0,') === 0).length > 0,
+    JSON.stringify(twoTexts.filter((t) => t.indexOf('(0,') === 0)));
+  chk('2 条曲线绘制无 NaN', mTwo.bad.length === 0, mTwo.bad.slice(0, 4).join(','));
 
   // 单条模式（markAll=false）只标当前那条
   const mOne = makeCtx();

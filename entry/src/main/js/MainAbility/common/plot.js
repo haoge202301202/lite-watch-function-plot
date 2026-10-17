@@ -414,13 +414,17 @@ export default {
         // 标注共用一个 placed 表，多条函数之间也会互相避让
         const placed = [];
         if (markAll) {
-            // 全部同屏：每条二次函数都标出顶点（用各自曲线的颜色），
-            // 只标顶点不标交点 —— 多条曲线叠在一起时交点标注必然糊成一片。
+            // 全部同屏：每条二次函数都标出顶点（用各自曲线的颜色）。
+            // 交点是否一并标出取决于曲线条数：
+            //   <= 2 条 —— 画面还有余量，交点/截距也标出来，信息更全；
+            //   >= 3 条 —— 只标顶点，因为多条曲线的交点必然糊成一片。
+            // 无论哪种情况，putLabel 的避让表都会兜底：位置太挤就只留点、不写字。
+            const withRoots = funcs.length <= 2;
             for (let i = 0; i < funcs.length; i++) {
                 const af = funcs[i];
                 if (af && af.quad) {
                     drawQuadPoints(ctx, af.quad, W, H, v, placed,
-                        { vertex: af.color, root: ROOT_C, yint: YINT_C }, true);
+                        { vertex: af.color, root: ROOT_C, yint: YINT_C }, !withRoots);
                 }
             }
         } else if (curIdx >= 0 && curIdx < funcs.length) {
