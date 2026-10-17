@@ -74,6 +74,11 @@ const FONT_MID = -24 * 0.35;
 // 滑动平移相关：DRAG_MIN 是判定"拖动"而非"点击"的累计位移阈值（像素），
 // 低于它的抖动一律当点击处理，否则按按钮时手指微动就会把视图带跑。
 const DRAG_MIN = 8;
+// 编辑页顶部「表达式回显」那一条横带的上下界（canvas 没有 clearRect，只能整条重铺底色）。
+// 基线在 y=72、22px 字形约 54..79，所以 52 起、38 高足以盖干净；
+// 键盘首行从 y=107 起，横带不会碰到键。
+const INPUT_TOP = 52;
+const INPUT_H = 38;
 // 平移上限（世界单位）：防止滑太远之后彻底迷路。
 const PAN_LIMIT = 160;
 const CALLS = ['sin', 'cos', 'tan', 'ln', 'lg', 'log2',
@@ -85,6 +90,11 @@ const PLOT_MODE = 0;
 const EDIT_MODE = 1;
 const HOME_MODE = 2;
 const SETTINGS_MODE = 3;
+// 绘图区在**任何时刻只画一条曲线**（「全部同屏」已按要求整体移除）。
+// 这两个数组就是传给 plot.draw 的曲线列表本身，复用它们，
+// 避免每次重绘都新建数组 —— 重绘很频繁，垃圾少一点，64KB 堆就多一分余量。
+const ONE = [null];
+const NONE = [];
 // 启动先进开始界面，由用户选择「进入绘图」或「设置」
 let mode = HOME_MODE;
 let hotZones = [];
@@ -268,6 +278,12 @@ export default {
         deferTimer = setTimeout(function () {
             deferTimer = null;
             self.repaint();
+            // 阶段标记只在「重绘顺利返回」之后才清掉，而且写在定时器回调里、
+            // 不在画布的绘制路径上 —— 在 Lite 上传写 ViewModel 会触发 text 组件重新布局，
+            // 夹在 canvas 绘制中间是自找麻烦。
+            // 真机上若崩在某一步，这个清空语句根本执行不到，标记就留在屏幕上。
+            const d = self.dbgText;
+            if (d && d.indexOf('保存') === 0) { self.dbgText = ''; }
         }, 0);
     },
 
@@ -303,12 +319,7 @@ export default {
             }
         } catch (e) {
             this.dbgText = 'err ' + e;
-            return;
         }
-        // 重绘成功才把诊断文字清掉。
-        // 这样「保存 3/5 算特殊点」这类阶段标记平时完全看不见（成功路径上必定被清空），
-        // 只有在真机上崩在某一阶段时，那一句才会留在屏幕上 —— 既是干净界面又是崩溃定位器。
-        if (this.dbgText !== '') { this.dbgText = ''; }
     },
 
     drawPlot(ctx, W) {
@@ -316,8 +327,8 @@ export default {
         const ox = Math.floor((W - s) / 2);
         const oy = 66;
 
-        // 全部曲线都会画成线条，但只给「当前这一条」(store 的 cur) 标特殊点。
-        // 左右键改的就是 cur，于是按键 = 换一条曲线看它的顶点/交点。
+        // 画面里始终只有一条曲线。(store 的 cur) 决定画哪一条，
+        // 左右键改的就是 cur，于是按键 = 换一条曲线看它的图像和顶点/交点。
         const total = store.count();
         const ci = store.getCur();
         const list = store.getList();
@@ -355,9 +366,15 @@ export default {
             }
         }
 
-        // 传整份 list（背景曲线仍要画线），curIdx 指定给哪一条标特殊点
+        // 只把「当前这一条」交给绘图模块 —— 画面里只出现一条函数图像。
+        // 其余曲线仍然保存在 store 里，左右键一按就换过来。
         const opt = settings.snapshot();
-        plot.draw(ctx, s, s, list, ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, opt);
+        if (it) {
+            ONE[0] = it;
+            plot.draw(ctx, s, s, ONE, 0, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, opt);
+        } else {
+            plot.draw(ctx, s, s, NONE, -1, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, opt);
+        }
 
         // 绘图区描边：把坐标系和页面背景分开。
         // 必须画在 plot.draw 之后 —— 它内部的 clear() 按 OX/OY 铺了整块底色，会盖掉先画的东西。
@@ -553,7 +570,17 @@ export default {
         hotZones.push(obx, oby, obw, obh, 'home');
     },
 
-    drawEdit(ctx, W) {
+    // 顶部表达式回显。单独抽出来有两个理由：
+    //  ① 整页重绘（drawEdit）和「只改一行字」的单键重绘（repaintInput）都要用它；
+    //  ② 敲一个键时只有这一行文字变了，键盘本身没变 —— 只重画这一条横带
+    //     是 fillRect + fillText 共 3 次 canvas 调用，而整页重绘要 56 次。
+    //     「在点击回调里做整屏 canvas 绘制」正是真机上崩溃的来源，能少一次就少一次。
+    drawInput(ctx, W) {
+        // 先用页面底色铺一条横带盖掉上一行（canvas 没有 clearRect）。
+        // 上下界都要包住 22px 字形：基线 72、字形约 54..79；键盘首行从 107 起，不会误伤。
+        ctx.fillStyle = BG;
+        ctx.fillRect(0, INPUT_TOP, W, INPUT_H);
+
         let txt = '';
         let color = DIM;
         if (editMsg) {
@@ -576,6 +603,26 @@ export default {
         ctx.fillStyle = color;
         ctx.textAlign = 'center';
         ctx.fillText(txt, W / 2, 72);
+    },
+
+    // 只重画顶部表达式区。敲键时走这条路径，绝不整页重绘。
+    repaintInput() {
+        if (!this.$refs) { return; }
+        const el = this.$refs.cv;
+        if (!el || !el.getContext) { return; }
+        const ctx = el.getContext('2d');
+        if (!ctx) { return; }
+        const W = this.cw;
+        if (!(W > 0) || !(this.ch > 0)) { return; }
+        try {
+            this.drawInput(ctx, W);
+        } catch (e) {
+            this.dbgText = 'err ' + e;
+        }
+    },
+
+    drawEdit(ctx, W) {
+        this.drawInput(ctx, W);
 
         const rows = fnPage ? keypad.FN_KEYS : keypad.MAIN_KEYS;
         // topY=100：键盘若从 y=60 起，第一行四角距圆心约 251px，超出 r=233 的圆屏会被裁掉
@@ -694,12 +741,12 @@ export default {
         }
         if (a === 'gotoSettings') {
             mode = SETTINGS_MODE;
-            this.repaint();
+            this.repaintDeferred();
             return;
         }
         if (a === 'home') {
             mode = HOME_MODE;
-            this.repaint();
+            this.repaintDeferred();
             return;
         }
         // 设置项：动作名形如 set0 / set1 / set2 / set3
@@ -707,7 +754,7 @@ export default {
             const k = parseInt(a.substring(3), 10);
             if (!isNaN(k)) {
                 settings.next(k);
-                this.repaint();
+                this.repaintDeferred();
             }
             return;
         }
@@ -735,45 +782,59 @@ export default {
             editMsg = '';
             editIdx = -1;
             fnPage = false;
-            this.repaint();
+            this.repaintDeferred();
             return;
         }
         if (a === '确定') { this.save(); return; }
-        if (a === '取消') { mode = PLOT_MODE; editMsg = ''; this.repaint(); return; }
+        // 取消 / 删除要换回绘图页，整页重绘走延迟（不在点击回调里直接画）
+        if (a === '取消') { mode = PLOT_MODE; editMsg = ''; this.repaintDeferred(); return; }
         if (a === '删除') {
             store.removeAt(editIdx);
             mode = PLOT_MODE;
             editMsg = '';
             editIdx = -1;
-            this.repaint();
+            this.repaintDeferred();
             return;
         }
+        // ↓ 以下都只改「顶部那一行表达式」，键盘本身不变：
+        //   只重画那一条横带（3 次 canvas 调用），绝不整页重绘（56 次）。
+        //   退格/清空曾经走整页重绘，在点击回调里这一下就把真机打黑了。
         if (a === '退') {
-            if (editText.length > 0) { editText = editText.substring(0, editText.length - 1); }
+            if (editText.length > 0) {
+                editText = editText.substring(0, editText.length - 1);
+                okText = null;      // 强制下一帧重新校验（text 变短也要重算是否合法）
+            }
             editMsg = '';
-            this.repaint();
+            this.repaintInput();
             return;
         }
-        if (a === '清') { editText = ''; editMsg = ''; this.repaint(); return; }
-        if (a === '函数') { fnPage = true; this.repaint(); return; }
-        if (a === '返回') { fnPage = false; this.repaint(); return; }
+        if (a === '清') {
+            editText = '';
+            okText = null;
+            editMsg = '';
+            this.repaintInput();
+            return;
+        }
+        // 函数页 / 主键盘页切换：键位整块变了，必须整页重绘，但同样走延迟
+        if (a === '函数') { fnPage = true; this.repaintDeferred(); return; }
+        if (a === '返回') { fnPage = false; this.repaintDeferred(); return; }
 
         const add = (CALLS.indexOf(a) >= 0) ? (a + '(') : a;
         if (editText.length + add.length > MAXLEN) { return; }
         editText = editText + add;
         editMsg = '';
-        this.repaint();
+        this.repaintInput();
     },
 
     save() {
         // 分阶段打标记：如果崩溃，屏幕顶部会留着最后一条，用来定位崩在哪一步
         this.dbgText = '保存 1/5 校验';
         const r = store.check(editText);
-        if (!r.ok) { editMsg = r.msg; this.dbgText = ''; this.repaint(); return; }
+        if (!r.ok) { editMsg = r.msg; this.dbgText = ''; this.repaintInput(); return; }
 
         this.dbgText = '保存 2/5 写入';
         const res = (editIdx >= 0) ? store.update(editIdx, editText) : store.add(editText);
-        if (!res.ok) { editMsg = res.msg; this.dbgText = ''; this.repaint(); return; }
+        if (!res.ok) { editMsg = res.msg; this.dbgText = ''; this.repaintInput(); return; }
 
         this.dbgText = '保存 3/5 算特殊点';
         // 把二次函数分析提前到保存时做完：绘图那一帧就不再需要跑多项式提取，

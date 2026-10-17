@@ -751,6 +751,16 @@ function runLegacyGone() {
     chk('plot.draw 传 11 个实参（已去掉 markAll）', argc === 11, '实参 ' + argc + ' 个');
   }
   chk('store 的 next/prev 是纯环形（无 n+1 档）', /cur = \(cur \+ 1\) % list\.length/.test(storeSrc));
+  // 关键：绘图区任何时刻只画一条曲线。页面曾经把整份 list 交给 plot.draw，
+  // 结果多条曲线同屏 —— 那正是「全部同屏」的实质，也是真机黑屏的根源。
+  chk('绘图区只把当前一条交给 plot.draw（传 ONE/NONE）',
+    /ONE\[0\] = it;/.test(idxSrc) && !/plot\.draw\(ctx, s, s, list,/.test(idxSrc));
+  chk('单元素数组复用，不每帧新建', /const ONE = \[null\];/.test(idxSrc) && /const NONE = \[\];/.test(idxSrc));
+  // 敲键只重画顶部一行文字，不整页重绘（整页 56 次 canvas 调用足以在点击回调里打黑屏）
+  chk('敲键走 repaintInput（只重画表达式行）', /repaintInput\(\) \{/.test(idxSrc));
+  const backKey = idxSrc.match(/if \(a === '\u9000'\) \{([\s\S]*?)\n        \}/);
+  chk('退格键不再整页重绘', !!backKey && backKey[1].indexOf('repaintInput') >= 0 && backKey[1].indexOf('this.repaint()') < 0,
+    backKey ? 'ok' : '未匹配到退格分支');
 }
 
 (async function main() {
