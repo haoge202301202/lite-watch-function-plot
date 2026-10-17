@@ -98,10 +98,11 @@ export default {
         }
     },
 
-    // 绘图区边长：留出顶部标题与底部按钮
+    // 绘图区边长：留出顶部标题与底部按钮，并保证正方形四角落在 r=233 圆内。
+    // 四角到圆心距离 = sqrt((s/2)^2 + (233 - oy)^2)，466 屏上 s=292、oy=58 时约 227.9。
     side() {
         let s = this.cw - 60;
-        const lim = this.ch - 160;
+        const lim = this.ch - 174;
         if (s > lim) { s = lim; }
         if (s > 300) { s = 300; }
         if (s < 120) { s = 120; }
@@ -142,7 +143,7 @@ export default {
     drawPlot(ctx, W) {
         const s = this.side();
         const ox = Math.floor((W - s) / 2);
-        const oy = 54;
+        const oy = 58;
         const it = store.curItem();
 
         // 顶部标题带上「序号/总数」：切换曲线时数字变化，是 prev / next 生效的直接反馈
@@ -150,12 +151,14 @@ export default {
         const ci = store.getCur();
         let head = HINT;
         if (it) {
-            head = clip(it.text, 14) + '   ' + (ci + 1) + '/' + total;
+            head = clip(it.text, 13) + '  ' + (ci + 1) + '/' + total;
         }
+        // 基线 44（不是 30）：圆屏顶部收窄，20px 字形的上部若从 y=14 起会越出圆边，
+        // 放到 y=28..49 这一段可用宽度才够放 18~20 个字符。
         ctx.font = '20px sans-serif';
         ctx.fillStyle = it ? FG : DIM;
         ctx.textAlign = 'center';
-        ctx.fillText(head, W / 2, 30);
+        ctx.fillText(head, W / 2, 44);
 
         // 二次函数特殊点：惰性计算（store 不依赖 poly）
         if (it && !it.quad) {
@@ -176,16 +179,18 @@ export default {
             ctx.font = '16px sans-serif';
             ctx.fillStyle = DIM;
             ctx.textAlign = 'center';
-            ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 26);
+            ctx.fillText(clip(it.pts, 24), W / 2, oy + s + 21);
         }
 
-        // 底部按钮 + 热区
+        // 底部按钮 + 热区。尺寸按圆屏安全区反推：
+        // 按钮行最外下角必须落在 r=233 圆内，否则两侧会被圆边裁掉、点不到。
+        // 3x72 + 2x10 = 236 宽，by=oy+s+30 时最远角约 222.8，余量 10px。
         hotZones = [];
-        const bw = 76;
-        const bh = 44;
-        const gap = 12;
+        const bw = 72;
+        const bh = 42;
+        const gap = 10;
         const bx = (W - (bw * 3 + gap * 2)) / 2;
-        const by = oy + s + 40;
+        const by = oy + s + 30;
         const labels = ['<', '+', '>'];
         const acts = ['prev', 'add', 'next'];
         for (let i = 0; i < 3; i++) {

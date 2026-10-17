@@ -221,12 +221,33 @@ function runGeom() {
       '最远角(' + wp[0] + ',' + wp[1] + ')  d=' + worst.toFixed(1) +
       (ok ? '  余量 ' + (r - worst).toFixed(1) + 'px' : '  ★越界 ' + (worst - r).toFixed(1) + 'px'));
   }
-  // 主页：.top 74 / canvas 270 / .info 32 / .bar 56
-  check('.expr 18字符@18px', center(162), 22, 162, 24);
-  check('.idx 序号', center(120), 48, 120, 18);
-  check('canvas 270x270', center(270), 74, 270, 270);
-  check('.info-t 30字符@17px', center(255), 352, 255, 17);
-  check('按钮行 3x64', center(228), 382, 228, 44);
+  // 主页是 canvas 全自绘：几何参数直接从 index.js 源码提取，
+  // 避免出现「改了布局，测试却还在校验旧数值」的脱节。
+  const idxPath = path.join(ROOT, 'entry', 'src', 'main', 'js', 'MainAbility', 'pages', 'index', 'index.js');
+  const idxSrc = fs.readFileSync(idxPath, 'utf8');
+  function pick(re, dflt) {
+    const m = idxSrc.match(re);
+    return m ? Number(m[1]) : dflt;
+  }
+  const oy = pick(/const oy = (\d+);/, 58);
+  const bw = pick(/const bw = (\d+);/, 72);
+  const bh = pick(/const bh = (\d+);/, 42);
+  const gap = pick(/const gap = (\d+);/, 10);
+  const byOff = pick(/const by = oy \+ s \+ (\d+);/, 30);
+  const limOff = pick(/const lim = this\.ch - (\d+);/, 174);
+  const titleY = pick(/ctx\.fillText\(head, W \/ 2, (\d+)\);/, 44);
+
+  let side = W - 60;
+  const limH = H - limOff;
+  if (side > limH) { side = limH; }
+  if (side > 300) { side = 300; }
+  side = Math.floor(side);
+
+  console.log('  （参数取自 index.js：oy=' + oy + ' s=' + side + ' bw=' + bw + ' bh=' + bh + ' gap=' + gap + '）');
+  check('标题 18字符@20px', center(180), titleY - 16, 180, 21);
+  check('绘图区 ' + side, center(side), oy, side, side);
+  check('摘要文字 20字符@16px', center(180), oy + side + 6, 180, 16);
+  check('按钮行 3x' + bw, center(bw * 3 + gap * 2), oy + side + byOff, bw * 3 + gap * 2, bh);
   // 编辑页：键盘直接跑 keypad.js 的真实布局，逐个键的四个角都要在圆内
   chk('主键盘页键数 = 27（扁平数组 /5）', KEYPAD && KEYPAD.layout(KEYPAD.MAIN_KEYS, W).length / 5 === 27,
     KEYPAD && KEYPAD.layout(KEYPAD.MAIN_KEYS, W).length / 5);
