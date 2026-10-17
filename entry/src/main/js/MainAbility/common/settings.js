@@ -18,7 +18,11 @@ const ITEMS = [
     { id: 'dotSize', label: '点标记大小', values: [2, 3, 5], def: 1, texts: ['小', '中', '大'], unit: '' },
     { id: 'showAxis', label: '对称轴', values: [1, 0], def: 0, texts: ['显示', '隐藏'], unit: '' },
     // 每次进入绘图是否清空上次的函数。默认 0（每次重来），与 v1.9.0 的行为一致。
-    { id: 'keepLast', label: '保留上次函数', values: [0, 1], def: 0, texts: ['每次重来', '接着上次'], unit: '' }
+    { id: 'keepLast', label: '保留上次函数', values: [0, 1], def: 0, texts: ['每次重来', '接着上次'], unit: '' },
+    // 动画级别：0 关闭（省电、最跟手）/ 1 简洁（按键反馈）/ 2 完整（再加曲线绘制动画）
+    { id: 'anim', label: '动画级别', values: [0, 1, 2], def: 1, texts: ['关闭', '简洁', '完整'], unit: '' },
+    // 画面等级：影响网格密度、刻度数量、曲线采样密度
+    { id: 'quality', label: '画面等级', values: [0, 1, 2], def: 1, texts: ['流畅', '标准', '精细'], unit: '' }
 ];
 
 const idxs = [];
@@ -76,7 +80,9 @@ export default {
             showRoots: ITEMS[1].values[idxs[1]],
             dotSize: ITEMS[2].values[idxs[2]],
             showAxis: ITEMS[3].values[idxs[3]],
-            keepLast: ITEMS[4].values[idxs[4]]
+            keepLast: ITEMS[4].values[idxs[4]],
+            anim: ITEMS[5].values[idxs[5]],
+            quality: ITEMS[6].values[idxs[6]]
         };
     },
 

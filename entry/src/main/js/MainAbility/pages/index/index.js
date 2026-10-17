@@ -113,6 +113,30 @@ let startY = 0;
 let lastKey = '';
 let lastAt = 0;
 
+// ---- 动画状态 ----
+// animT：曲线入场动画的横向进度（1 = 画完）。用 setInterval 推进，
+// 每帧整屏重绘一次；动画级别 < 2 时恒为 1，等于不做动画。
+let animT = 1;
+let animTimer = null;
+// 按下的键（键盘高亮反馈）与其复位定时器
+let pressedKey = '';
+let pressedTimer = null;
+
+function stopAnim() {
+    if (animTimer !== null) {
+        clearInterval(animTimer);
+        animTimer = null;
+    }
+}
+
+function stopPress() {
+    if (pressedTimer !== null) {
+        clearTimeout(pressedTimer);
+        pressedTimer = null;
+    }
+    pressedKey = '';
+}
+
 // 字号 -> 文字在矩形内垂直居中所需的基线偏移。
 // 早先各处手写偏移（一处 -24*0.35、一处 +9，方向相反）曾让符号整体下坠约 17px，
 // 新增文字统一走这个函数，避免同类问题再出现。
@@ -165,6 +189,17 @@ export default {
         editMsg = '';
         this.repaint();
         this.boot();
+    },
+
+    // 页面隐藏 / 销毁时务必停掉定时器：动画和工作线程留到后台只会白耗电
+    onHide() {
+        stopAnim();
+        stopPress();
+    },
+
+    onDestroy() {
+        stopAnim();
+        stopPress();
     },
 
     boot() {
@@ -294,9 +329,10 @@ export default {
         }
 
         // 最后一个参数 markAll：全部模式下每条二次函数都标顶点，单条模式只标当前这条
+        const opt = settings.snapshot();
+        opt.progress = animT;   // 入场动画的横向进度（1 = 完整）
         plot.draw(ctx, s, s, (single >= 0) ? [list[single]] : list,
-            (single >= 0) ? 0 : ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, single < 0,
-            settings.snapshot());
+            (single >= 0) ? 0 : ci, ox, oy, ZOOMS[zoomIdx], viewCx, viewCy, single < 0, opt);
 
         // 绘图区描边：把坐标系和页面背景分开。
         // 必须画在 plot.draw 之后 —— 它内部的 clear() 按 OX/OY 铺了整块底色，会盖掉先画的东西。
@@ -452,7 +488,9 @@ export default {
         ctx.fillText('进入绘图时', hbx + 16, kby + kbh / 2 + vMid(19));
         ctx.fillStyle = FG;
         ctx.textAlign = 'right';
-        ctx.fillText(settings.textOf(keepIdx), hbx + hbw - 16, kby + kbh / 2 + vMid(19));
+        ctx.fillText(settings.textOf(keepIdx), hbx + hbw - 30, kby + kbh / 2 + vMid(19));
+        ctx.fillStyle = MUTED;
+        ctx.fillText('>', hbx + hbw - 16, kby + kbh / 2 + vMid(19));
         hotZones.push(hbx, kby, hbw, kbh, 'set' + keepIdx);
     },
 
@@ -463,38 +501,45 @@ export default {
         ctx.textAlign = 'center';
         ctx.fillStyle = FG;
         ctx.font = '28px sans-serif';
-        ctx.fillText('设置', W / 2, 74);
+        ctx.fillText('设置', W / 2, 70);
 
+        // 7 项之后纵向很紧：行高压到 43、起始上提到 92，才装得下（末行底边 393，返回键 401..439）
         const srw = 300;
-        const srh = 54;
+        const srh = 43;
         const srx = (W - srw) / 2;
-        const sry0 = 102;
+        const sry0 = 92;
         const n = settings.count();
         for (let i = 0; i < n; i++) {
             const y = sry0 + i * srh;
             card(ctx, srx, y + 3, srw, srh - 6, CARD);
 
             ctx.fillStyle = FG;
-            ctx.font = '20px sans-serif';
+            ctx.font = '18px sans-serif';
             ctx.textAlign = 'left';
-            ctx.fillText(settings.ITEMS[i].label, srx + 18, y + srh / 2 + 7);
+            ctx.fillText(settings.ITEMS[i].label, srx + 16, y + srh / 2 + 6);
 
             ctx.fillStyle = DIM;
             ctx.textAlign = 'right';
-            ctx.fillText(settings.textOf(i), srx + srw - 18, y + srh / 2 + 7);
+            ctx.fillText(settings.textOf(i), srx + srw - 28, y + srh / 2 + 6);
+            // 右侧的小箭头：提示「这一行可以点」，否则纯文字行看不出是可交互的
+            ctx.fillStyle = MUTED;
+            ctx.textAlign = 'right';
+            ctx.fillText('>', srx + srw - 14, y + srh / 2 + 6);
 
             hotZones.push(srx, y, srw, srh, 'set' + i);
         }
 
         const obw = 120;
-        const obh = 46;
+        const obh = 38;
         const obx = (W - obw) / 2;
-        const oby = sry0 + n * srh + 12;
+        const oby = sry0 + n * srh + 8;
         card(ctx, obx, oby, obw, obh, CARD);
         ctx.fillStyle = FG;
         ctx.font = '22px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('返回', W / 2, oby + obh / 2 + vMid(22));
+        ctx.font = '20px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('返回', W / 2, oby + obh / 2 + vMid(20));
         hotZones.push(obx, oby, obw, obh, 'home');
     },
 
@@ -526,7 +571,42 @@ export default {
                 if (String(hotZones[i]) === '取消') { hotZones[i] = '删除'; }
             }
         }
-        keypad.draw(ctx, W, this.ch, hotZones);
+        keypad.draw(ctx, W, this.ch, hotZones, pressedKey);
+    },
+
+    // 曲线从左往右「长出来」的入场动画。动画级别 < 2 时直接画完整，不启动定时器。
+    // 调用方负责随后 repaint 一次（animT 此时是 0，第一帧几乎空白，正是入场起点）。
+    startAnim() {
+        stopAnim();
+        if (settings.snapshot().anim < 2) {
+            animT = 1;
+            return;
+        }
+        const self = this;
+        animT = 0;
+        animTimer = setInterval(function () {
+            animT = animT + 0.16;
+            if (animT >= 1) {
+                animT = 1;
+                stopAnim();
+            }
+            self.repaint();
+        }, 40);
+    },
+
+    // 按键高亮反馈：只在编辑键盘上做 —— 绘图页的按钮会牵动整条曲线重绘，太重。
+    flashKey(label) {
+        if (mode !== EDIT_MODE) { return; }
+        if (settings.snapshot().anim < 1) { return; }
+        stopPress();
+        pressedKey = String(label);
+        const self = this;
+        this.repaint();
+        pressedTimer = setTimeout(function () {
+            pressedKey = '';
+            pressedTimer = null;
+            self.repaint();
+        }, 140);
     },
 
     // 左右键：在「全部」与逐条之间循环。同时把选中项同步过去，
@@ -536,6 +616,7 @@ export default {
         if (n === 0) { return; }
         focusPos = focus.stepFocusPos(focusPos, n, dir);
         if (focusPos > 0) { store.setCur(focusPos - 1); }
+        this.startAnim();
         this.repaint();
     },
 
@@ -615,6 +696,7 @@ export default {
     },
 
     act(a) {
+        this.flashKey(a);
         if (a === 'gotoPlot') {
             // 开关决定「每次重来」还是「接着上次」：
             //   每次重来 —— 清空函数并把缩放/平移/焦点一起复位；
@@ -627,6 +709,7 @@ export default {
                 zoomIdx = ZOOM_BASE;
             }
             mode = PLOT_MODE;
+            this.startAnim();
             this.repaint();
             return;
         }
@@ -705,6 +788,7 @@ export default {
         editIdx = -1;
         // 保存后直接聚焦到刚保存的那条，按一下就看得见结果
         focusPos = store.getCur() + 1;
+        this.startAnim();
         this.repaint();
     }
 };

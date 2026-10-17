@@ -15,6 +15,8 @@ const C_NUM = '#1C2634';
 const C_OP = '#2A3646';
 const C_OK = '#2E7DF6';
 const C_DEL = '#B3362B';
+// 按下瞬间的高亮色：比普通键亮一档，松手后恢复
+const C_HL = '#3E5068';
 const F_NUM = '#EDF2F8';
 const F_OP = '#9FC8F0';
 
@@ -99,14 +101,14 @@ function layout(rows, W, topY) {
 /**
  * 绘制整块键盘（含顶部表达式区）。flat 为 layout 的结果。
  */
-function draw(ctx, W, H, flat) {
+function draw(ctx, W, H, flat, highlight) {
     for (let i = 0; i + 4 < flat.length; i += 5) {
         const x = flat[i];
         const y = flat[i + 1];
         const w = flat[i + 2];
         const h = flat[i + 3];
         const label = flat[i + 4];
-        ctx.fillStyle = keyBg(label);
+        ctx.fillStyle = (highlight && label === highlight) ? C_HL : keyBg(label);
         ctx.fillRect(x, y, w, h);
         const fs = keyFont(label);
         ctx.font = fs + 'px sans-serif';

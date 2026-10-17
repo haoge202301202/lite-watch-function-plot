@@ -77,8 +77,8 @@ function clear(ctx, W, H) {
     ctx.fillRect(OX, OY, W, H);
 }
 
-function drawGrid(ctx, W, H, v) {
-    const step = niceStep(v.xmax - v.xmin, 8);
+function drawGrid(ctx, W, H, v, target) {
+    const step = niceStep(v.xmax - v.xmin, target || 8);
     ctx.strokeStyle = GRID;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -120,8 +120,8 @@ function drawAxes(ctx, W, H, v) {
     ctx.stroke();
 }
 
-function drawTicks(ctx, W, H, v) {
-    const step = niceStep(v.xmax - v.xmin, 4);
+function drawTicks(ctx, W, H, v, target) {
+    const step = niceStep(v.xmax - v.xmin, target || 4);
     const px0 = sxOf(0, W, v);
     const py0 = syOf(0, H, v);
     ctx.fillStyle = TICK_C;
@@ -162,9 +162,12 @@ function drawTicks(ctx, W, H, v) {
  * 遇到 NaN/Infinity（定义域外）或相邻点竖直跳变（1/x、tan 的渐近线）时断开路径，
  * 避免出现横贯画布的假竖线。
  */
-function drawCurve(ctx, ast, color, W, H, v, lw) {
+function drawCurve(ctx, ast, color, W, H, v, lw, sampleSteps, upto) {
     const kx = W / (v.xmax - v.xmin);
-    const steps = W > 360 ? 360 : W;
+    let steps = (typeof sampleSteps === 'number' && sampleSteps > 8) ? sampleSteps : (W > 360 ? 360 : W);
+    // upto < 1 时只画到某个横向比例，用于「曲线从左往右长出来」的入场动画
+    const frac = (typeof upto === 'number' && upto >= 0 && upto < 1) ? upto : 1;
+    if (frac < 1) { steps = Math.max(2, Math.floor(steps * frac)); }
     const dx = (v.xmax - v.xmin) / steps;
     // 严格裁到绘图区上下边界：Lite canvas 没有 clip()，否则曲线会画到
     // 顶部表达式文字和底部按钮上面（坐标轴/网格本身不会越界，只有曲线会）。
@@ -452,13 +455,23 @@ export default {
 
         const v = makeView(W, H, half, cx, cy);
         clear(ctx, W, H);
-        drawGrid(ctx, W, H, v);
+        // 画面等级：0 流畅（网格稀疏、采样减半）/ 1 标准 / 2 精细（网格与采样都加密）
+        const q = (typeof o.quality === 'number') ? o.quality : 1;
+        const gridTarget = (q >= 2) ? 12 : (q <= 0 ? 4 : 8);
+        const tickTarget = (q >= 2) ? 6 : (q <= 0 ? 3 : 4);
+        // 采样密度也分三档，让「标准」和「精细」是看得出区别的：152 / 243 / 每像素一点
+        const sampleSteps = (q >= 2) ? (W > 360 ? 360 : W)
+            : (q <= 0 ? Math.floor(W / 2) : Math.floor(W * 0.8));
+        // 曲线入场动画的横向进度（1 表示完整）
+        const upto = (typeof o.progress === 'number' && o.progress >= 0 && o.progress < 1) ? o.progress : 1;
+
+        drawGrid(ctx, W, H, v, gridTarget);
         drawAxes(ctx, W, H, v);
-        drawTicks(ctx, W, H, v);
+        drawTicks(ctx, W, H, v, tickTarget);
         for (let i = 0; i < funcs.length; i++) {
             const f = funcs[i];
             if (f && f.ast) {
-                drawCurve(ctx, f.ast, f.color, W, H, v, lw);
+                drawCurve(ctx, f.ast, f.color, W, H, v, lw, sampleSteps, upto);
             }
         }
         // 标注共用一个 placed 表，多条函数之间也会互相避让
