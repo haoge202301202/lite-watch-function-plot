@@ -474,6 +474,9 @@ export default {
                 drawCurve(ctx, f.ast, f.color, W, H, v, lw, sampleSteps, upto);
             }
         }
+        // 入场动画进行中（upto < 1）先不画标注：曲线才长到一半，
+        // 顶点/交点却已经标在还没画到的位置，看起来会像"标注飞到空白处"。
+        if (upto < 1) { return; }
         // 标注共用一个 placed 表，多条函数之间也会互相避让
         const placed = [];
         if (markAll) {

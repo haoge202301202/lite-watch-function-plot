@@ -121,8 +121,9 @@ let animTimer = null;
 // 按下的键（键盘高亮反馈）与其复位定时器
 let pressedKey = '';
 let pressedTimer = null;
-// 界面转场：wipeT 是「尚未揭开」的比例（1 = 全遮，0 = 完全显示）。
-// 用背景色矩形从左往右撤走，做出擦除式转场 —— canvas 没有 alpha，做不了淡入淡出。
+// 界面转场：wipeT 是「已揭开」的比例 —— 0 = 整屏被背景色盖住，1 = 完全显示。
+// 遮罩画在 [W*wipeT, W] 这一段，所以 wipeT 增大时背景色从左往右缩走，形成擦除式入场。
+// canvas 没有 alpha，做不了淡入淡出，只能用这种"揭开"的方式。
 let wipeT = 1;
 let wipeTimer = null;
 
@@ -131,6 +132,9 @@ function stopAnim() {
         clearInterval(animTimer);
         animTimer = null;
     }
+    // 关键：中断（页面 onHide、被新的动画顶掉）时必须落回「已画完」，
+    // 否则 animT 停在 0.4 这种中间值，下次重绘只画得出一小截曲线。
+    animT = 1;
 }
 
 function stopPress() {
@@ -146,6 +150,8 @@ function stopWipe() {
         clearInterval(wipeTimer);
         wipeTimer = null;
     }
+    // 同理：中断时把遮罩收干净，否则页面会一直卡着半块背景色
+    wipeT = 1;
 }
 
 // 字号 -> 文字在矩形内垂直居中所需的基线偏移。

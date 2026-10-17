@@ -26,7 +26,18 @@ const ITEMS = [
 ];
 
 const idxs = [];
-for (let i = 0; i < ITEMS.length; i++) { idxs.push(ITEMS[i].def); }
+// id -> 下标。snapshot() 每帧都会调用（动画期间 25 帧/秒），
+// 不能每次都按 id 线性查找，所以在模块初始化时建一次映射。
+const POS = {};
+for (let i = 0; i < ITEMS.length; i++) {
+    idxs.push(ITEMS[i].def);
+    POS[ITEMS[i].id] = i;
+}
+
+function valOf(id) {
+    const i = POS[id];
+    return (i === undefined) ? 0 : ITEMS[i].values[idxs[i]];
+}
 
 function clampIdx(i, v) {
     const n = ITEMS[i].values.length;
@@ -60,10 +71,8 @@ export default {
     // 按 id 取下标。菜单原先用 count()-1 取「保留上次函数」，
     // 后来加了两项设置，它悄悄指到了「画面等级」上 —— 直接按 id 查更稳。
     indexOf: function (id) {
-        for (let i = 0; i < ITEMS.length; i++) {
-            if (ITEMS[i].id === id) { return i; }
-        }
-        return -1;
+        const i = POS[id];
+        return (i === undefined) ? -1 : i;
     },
 
     // 第 i 项当前的显示文本（数值项带单位后缀）
@@ -84,14 +93,16 @@ export default {
 
     // 交给 plot.draw 的取值快照
     snapshot: function () {
+        // 按 id 取值而不是写死下标：之前菜单用 count()-1 定位「保留上次函数」，
+        // 后来加了两项设置，它就悄悄指到了「画面等级」上。
         return {
-            width: ITEMS[0].values[idxs[0]],
-            showRoots: ITEMS[1].values[idxs[1]],
-            dotSize: ITEMS[2].values[idxs[2]],
-            showAxis: ITEMS[3].values[idxs[3]],
-            keepLast: ITEMS[4].values[idxs[4]],
-            anim: ITEMS[5].values[idxs[5]],
-            quality: ITEMS[6].values[idxs[6]]
+            width: valOf('width'),
+            showRoots: valOf('showRoots'),
+            dotSize: valOf('dotSize'),
+            showAxis: valOf('showAxis'),
+            keepLast: valOf('keepLast'),
+            anim: valOf('anim'),
+            quality: valOf('quality')
         };
     },
 

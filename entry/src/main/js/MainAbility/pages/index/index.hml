@@ -1,5 +1,5 @@
 <stack class="page" on:touchstart="onTS" on:touchmove="onTM" on:touchend="onTE" on:click="onClick">
-    <!-- 单页面架构，全应用 2 个组件。
+    <!-- 单页面架构，全应用 3 个组件（stack / canvas / text）。
          事件只绑在根 stack 上这一处：绑定到子节点会因冒泡导致一次点击触发两次。
          预览器把鼠标"拖动"映射为 touch、"直接点击"派发 click；真机触摸走 touch。
          两条路径都汇到同一个命中入口，并用时间戳防抖去重。
